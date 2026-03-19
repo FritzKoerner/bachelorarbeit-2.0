@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pt
+*.zip
+*.db
+*.log
+*.gif
+*.png
+runs/
+logs/
+wandb/
+eval_data/
+artifacts/
+debug_depth_output/
+.firecrawl/
+.planning/

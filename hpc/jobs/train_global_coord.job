@@ -1,0 +1,50 @@
+#!/bin/bash
+#SBATCH --job-name=genesis-global-coord
+#SBATCH --partition=paula
+#SBATCH --gpus=a30:1
+#SBATCH --mem=64G
+#SBATCH --cpus-per-task=16
+#SBATCH --time=48:00:00
+#SBATCH --output=%x-slurm-%j.out
+#SBATCH --error=%x-slurm-%j.err
+#SBATCH --mail-type=END,FAIL
+
+# ==============================================================================
+# Global Coordinate Landing — PPO training on HPC
+#
+# Submit: sbatch train_global_coord.job
+# Monitor: squeue -u $USER
+# Cancel: scancel <jobid>
+# ==============================================================================
+
+# --- Environment ---
+module purge
+module load Anaconda3
+module load CUDA/12.6.0
+eval "$(conda shell.bash hook)"
+conda activate ba_v04
+
+# --- Use workspace if available, otherwise home ---
+GENESIS_DIR="$HOME/genesis_v04"
+if [ -d "/work/$USER/genesis-training" ]; then
+    WORK_DIR="/work/$USER/genesis-training"
+    # Symlink logs dir so training output goes to workspace
+    mkdir -p "$WORK_DIR/prototyp_global_coordinate/logs"
+    ln -sfn "$WORK_DIR/prototyp_global_coordinate/logs" \
+            "$GENESIS_DIR/prototyp_global_coordinate/logs"
+    echo "Using workspace: $WORK_DIR"
+fi
+
+# --- Training ---
+cd "$GENESIS_DIR/prototyp_global_coordinate"
+
+echo "=== Job started: $(date) ==="
+echo "Host: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
+echo "Training: train_rl_wb.py -B 4096 --max_iterations 401"
+echo ""
+
+python train_rl_wb.py -B 4096 --max_iterations 401
+
+echo ""
+echo "=== Job complete: $(date) ==="

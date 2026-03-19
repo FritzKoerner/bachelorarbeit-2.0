@@ -1,0 +1,399 @@
+"""
+CoordinateLandingEnv: rsl-rl v5.x compatible drone environment for global-coordinate landing.
+
+The RL agent outputs a target position (x, y, z) and yaw angle; a cascading PID
+controller tracks that target and outputs motor RPMs.  The environment learns to
+choose target coordinates that guide the drone to the landing site.
+
+Constructor signature (rsl-rl style):
+    env = CoordinateLandingEnv(num_envs, env_cfg, obs_cfg, reward_cfg, show_viewer)
+    gs.init(...)     # called ONCE outside this class
+    env.build()      # creates Genesis scene + PID controller + buffers
+
+Observation: TensorDict({"policy": (n_envs, 17)})
+    rel_pos(3) + quat(4) + lin_vel(3) + ang_vel(3) + last_actions(4)
+
+Action: (n_envs, 4) float in [-1, 1]
+    [ax, ay, az, ayaw]
+    target_x   = current_x + ax * action_scales[0]
+    target_y   = current_y + ay * action_scales[1]
+    target_z   = current_z + az * action_scales[2]
+    target_yaw = ayaw * 180.0   # degrees
+"""
+
+import math
+import copy
+
+import torch
+from tensordict import TensorDict
+import genesis as gs
+from genesis.utils.geom import (
+    quat_to_xyz,
+    transform_by_quat,
+    inv_quat,
+    transform_quat_by_quat,
+)
+
+from controllers.pid_controller import CascadingPIDController
+
+
+def gs_rand_float(lower, upper, shape, device):
+    return (upper - lower) * torch.rand(size=shape, device=device) + lower
+
+
+class CoordinateLandingEnv:
+    def __init__(self, num_envs: int, env_cfg: dict, obs_cfg: dict,
+                 reward_cfg: dict, show_viewer: bool = False):
+        self.num_envs = num_envs
+        self.num_obs = obs_cfg["num_obs"]           # 20
+        self.num_privileged_obs = None
+        self.num_actions = env_cfg["num_actions"]   # 4
+        self.device = gs.device
+
+        self.dt = 0.01  # 100 Hz
+        self.max_episode_length = math.ceil(env_cfg["episode_length_s"] / self.dt)
+
+        self.env_cfg = env_cfg
+        self.obs_cfg = obs_cfg
+        self.reward_cfg = reward_cfg
+        self.cfg = env_cfg  # Logger expects env.cfg
+        self.show_viewer = show_viewer
+
+        self.obs_scales = obs_cfg["obs_scales"]
+        self.reward_scales = copy.deepcopy(reward_cfg["reward_scales"])
+
+        self._built = False
+
+    # ------------------------------------------------------------------
+    # Two-phase construction: call build() after gs.init()
+    # ------------------------------------------------------------------
+
+    def build(self):
+        """Create Genesis scene, drone, PID controller, and all tensor buffers."""
+        scene = gs.Scene(
+            sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
+            viewer_options=gs.options.ViewerOptions(
+                max_FPS=60,
+                camera_pos=(7.0, 0.0, 5.0),
+                camera_lookat=(3.0, 3.0, 3.0),
+                camera_fov=60,
+            ),
+            vis_options=gs.options.VisOptions(
+                rendered_envs_idx=list(range(min(10, self.num_envs)))
+            ),
+            rigid_options=gs.options.RigidOptions(
+                dt=self.dt,
+                constraint_solver=gs.constraint_solver.Newton,
+                enable_collision=True,
+                enable_joint_limit=True,
+            ),
+            show_viewer=self.show_viewer,
+        )
+
+        scene.add_entity(gs.morphs.Plane())
+
+        if self.env_cfg.get("visualize_target", False):
+            self.target_vis = scene.add_entity(
+                morph=gs.morphs.Mesh(
+                    file="meshes/sphere.obj",
+                    scale=0.15,
+                    fixed=True,
+                    collision=False,
+                    batch_fixed_verts=True,
+                ),
+                surface=gs.surfaces.Rough(
+                    diffuse_texture=gs.textures.ColorTexture(color=(1.0, 0.5, 0.5))
+                ),
+            )
+        else:
+            self.target_vis = None
+
+        self.drone = scene.add_entity(
+            gs.morphs.Drone(
+                file="../assets/robots/draugas/draugas_genesis.urdf",
+                pos=(0, 0, 3.0),
+                euler=(0, 0, 0),
+                propellers_link_name=["prop0_link", "prop1_link", "prop2_link", "prop3_link"],
+                propellers_spin=[1, -1, 1, -1],
+            )
+        )
+
+        env_spacing = self.env_cfg.get("env_spacing", 40.0)
+        scene.build(n_envs=self.num_envs, env_spacing=(env_spacing, env_spacing))
+        self.scene = scene
+
+        # Initial orientation (identity quat [w,x,y,z])
+        self.base_init_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=gs.device)
+        self.inv_base_init_quat = inv_quat(self.base_init_quat)
+
+        # Cascading PID controller (vectorized)
+        self.controller = CascadingPIDController(
+            drone=self.drone,
+            dt=self.dt,
+            base_rpm=self.env_cfg["pid_params"]["base_rpm"],
+            max_rpm=self.env_cfg["pid_params"]["max_rpm"],
+            pid_params=self.env_cfg["pid_params"],
+            n_envs=self.num_envs,
+            device=gs.device,
+        )
+
+        # Multiply per-step rewards by dt so their magnitude is time-independent.
+        # Terminal rewards (crash) are one-time events and must NOT be scaled by dt.
+        per_step_rewards = {"distance", "time"}
+        for name in self.reward_scales:
+            if name in per_step_rewards:
+                self.reward_scales[name] *= self.dt
+
+        self.reward_functions = {
+            name: getattr(self, "_reward_" + name)
+            for name in self.reward_scales
+        }
+        self.episode_sums = {
+            name: torch.zeros(self.num_envs, device=gs.device, dtype=gs.tc_float)
+            for name in self.reward_scales
+        }
+
+        # Observation / reward / reset buffers
+        self.obs_buf           = torch.zeros((self.num_envs, self.num_obs), device=gs.device, dtype=gs.tc_float)
+        self.rew_buf           = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
+        self.reset_buf         = torch.ones((self.num_envs,), device=gs.device, dtype=gs.tc_int)
+        self.episode_length_buf = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_int)
+
+        # Action buffers
+        self.actions      = torch.zeros((self.num_envs, self.num_actions), device=gs.device, dtype=gs.tc_float)
+        self.last_actions = torch.zeros_like(self.actions)
+
+        # State buffers
+        self.base_pos       = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
+        self.last_base_pos  = torch.zeros_like(self.base_pos)
+        self.base_quat      = torch.zeros((self.num_envs, 4), device=gs.device, dtype=gs.tc_float)
+        self.base_lin_vel   = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
+        self.base_ang_vel   = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
+
+        # Target and relative position
+        self.target_pos  = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
+        self.rel_pos     = torch.zeros_like(self.base_pos)
+        self.last_rel_pos = torch.zeros_like(self.base_pos)
+
+        # Hover counter: counts consecutive steps within hover_radius of target
+        self.hover_counter = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_int)
+
+        self.global_step = 0  # counts calls to step(); used for curriculum
+
+        self.extras = {}
+        self._built = True
+
+        # Reset all envs so the runner sees valid state from get_observations().
+        # The v5.x runner never calls reset() explicitly.
+        self.reset()
+
+    # ------------------------------------------------------------------
+    # rsl-rl interface
+    # ------------------------------------------------------------------
+
+    def step(self, actions):
+        self.actions = torch.clip(actions, -1.0, 1.0)
+
+        # Map RL actions → small offsets from the current drone position.
+        # The PID target is always nearby, preventing aggressive chasing.
+        scales = self.env_cfg["action_scales"]
+        target_x   = self.base_pos[:, 0] + self.actions[:, 0] * scales[0]
+        target_y   = self.base_pos[:, 1] + self.actions[:, 1] * scales[1]
+        target_z   = self.base_pos[:, 2] + self.actions[:, 2] * scales[2]
+        target_yaw = self.actions[:, 3] * 180.0  # absolute yaw (degrees)
+        target_pos = torch.stack([target_x, target_y, target_z], dim=-1)
+
+        # PID → motor RPMs → physics step
+        rpms = self.controller.update(target_pos, target_yaw)
+        self.drone.set_propellels_rpm(rpms)
+        if self.target_vis is not None:
+            self.target_vis.set_pos(self.target_pos, zero_velocity=True)
+        self.scene.step()
+
+        # Update state buffers
+        self.episode_length_buf += 1
+        self.last_base_pos[:] = self.base_pos[:]
+        self.base_pos[:]      = self.drone.get_pos()
+        self.rel_pos          = self.target_pos - self.base_pos
+        self.last_rel_pos     = self.target_pos - self.last_base_pos
+        self.base_quat[:]     = self.drone.get_quat()
+
+        base_euler = quat_to_xyz(
+            transform_quat_by_quat(self.inv_base_init_quat, self.base_quat),
+            rpy=True, degrees=True,
+        )
+        inv_base_quat = inv_quat(self.base_quat)
+        self.base_lin_vel[:] = transform_by_quat(self.drone.get_vel(), inv_base_quat)
+        self.base_ang_vel[:] = transform_by_quat(self.drone.get_ang(), inv_base_quat)
+
+        # Hover counter — increments only when close AND nearly stationary
+        close_enough = torch.norm(self.rel_pos, dim=1) < self.env_cfg["hover_radius"]
+        slow_enough  = torch.norm(self.base_lin_vel, dim=1) < self.env_cfg["success_vel_threshold"]
+        near_target  = close_enough & slow_enough
+        self.hover_counter[ near_target] += 1
+        self.hover_counter[~near_target]  = 0
+
+        # Termination
+        self.crash_condition = (
+            (self.base_pos[:, 2] < 0.2)
+            | (torch.abs(base_euler[:, 0]) > 60.0)
+            | (torch.abs(base_euler[:, 1]) > 60.0)
+            | (torch.norm(self.rel_pos, dim=1) > 50.0)
+        )
+        self.success_condition = self.hover_counter >= self.env_cfg["hover_steps"]
+        timeout_condition = self.episode_length_buf > self.max_episode_length
+
+        self.penalty_condition = self.crash_condition | timeout_condition
+
+        self.reset_buf = timeout_condition | self.crash_condition | self.success_condition
+
+        self.extras["time_outs"] = torch.zeros_like(self.reset_buf, dtype=gs.tc_float)
+        self.extras["time_outs"][timeout_condition] = 1.0
+
+        self.global_step += 1
+
+        # Compute rewards BEFORE reset so they reflect the terminal state,
+        # not the new episode's initial state.
+        self.rew_buf[:] = 0.0
+        for name, reward_func in self.reward_functions.items():
+            rew = reward_func() * self.reward_scales[name]
+            self.rew_buf += rew
+            self.episode_sums[name] += rew
+
+        # Auto-reset done envs AFTER rewards but BEFORE observations,
+        # so obs reflects the new episode for rsl-rl.
+        self.reset_idx(self.reset_buf.nonzero(as_tuple=False).reshape((-1,)))
+
+        # Compute observations (post-reset for done envs)
+        self.obs_buf = self._compute_obs()
+        self.last_actions[:] = self.actions[:]
+
+        obs = self.get_observations()
+        return obs, self.rew_buf, self.reset_buf, self.extras
+
+    def reset_idx(self, envs_idx):
+        if len(envs_idx) == 0:
+            return
+
+        n = len(envs_idx)
+
+        # Randomize drone spawn
+        offset = self.env_cfg["spawn_offset"]
+        sx = gs_rand_float(-offset, offset, (n,), gs.device)
+        sy = gs_rand_float(-offset, offset, (n,), gs.device)
+        sz = gs_rand_float(
+            self.env_cfg["spawn_height_min"],
+            self.env_cfg["spawn_height_max"],
+            (n,), gs.device,
+        )
+        spawn_pos = torch.stack([sx, sy, sz], dim=-1)
+
+        # Randomize target position (curriculum: close to drone early in training)
+        curriculum_steps = self.env_cfg.get("curriculum_steps", 0)
+        if self.global_step < curriculum_steps:
+            r = self.env_cfg.get("curriculum_radius", 1.0)
+            tx = sx + gs_rand_float(-r, r, (n,), gs.device)
+            ty = sy + gs_rand_float(-r, r, (n,), gs.device)
+            tz = sz + gs_rand_float(-r, r, (n,), gs.device)
+            tz = torch.clamp(tz, min=0.2)  # keep above ground
+        else:
+            tx = gs_rand_float(*self.env_cfg["target_x_range"], (n,), gs.device)
+            ty = gs_rand_float(*self.env_cfg["target_y_range"], (n,), gs.device)
+            tz = gs_rand_float(*self.env_cfg["target_z_range"], (n,), gs.device)
+        self.target_pos[envs_idx] = torch.stack([tx, ty, tz], dim=-1)
+
+        self.base_pos[envs_idx]      = spawn_pos
+        self.last_base_pos[envs_idx] = spawn_pos
+        self.base_quat[envs_idx]     = self.base_init_quat.reshape(1, -1)
+
+        self.drone.set_pos(spawn_pos, zero_velocity=True, envs_idx=envs_idx)
+        self.drone.set_quat(self.base_quat[envs_idx], zero_velocity=True, envs_idx=envs_idx)
+        self.base_lin_vel[envs_idx] = 0
+        self.base_ang_vel[envs_idx] = 0
+        self.drone.zero_all_dofs_velocity(envs_idx)
+
+        # Reset relative positions
+        self.rel_pos      = self.target_pos - self.base_pos
+        self.last_rel_pos = self.target_pos - self.last_base_pos
+
+        # Reset PID state for these envs
+        self.controller.reset_idx(envs_idx)
+
+        # Reset buffers
+        self.last_actions[envs_idx]      = 0.0
+        self.episode_length_buf[envs_idx] = 0
+        self.reset_buf[envs_idx]          = True
+        self.hover_counter[envs_idx]      = 0
+
+        # Log episode stats
+        self.extras["episode"] = {}
+        for key in self.episode_sums:
+            self.extras["episode"]["rew_" + key] = (
+                torch.mean(self.episode_sums[key][envs_idx]).item()
+                / self.env_cfg["episode_length_s"]
+            )
+            self.episode_sums[key][envs_idx] = 0.0
+
+    def reset(self):
+        self.reset_buf[:] = True
+        self.reset_idx(torch.arange(self.num_envs, device=gs.device))
+        return self.get_observations()
+
+    def get_observations(self) -> TensorDict:
+        return TensorDict({"policy": self.obs_buf}, batch_size=[self.num_envs])
+
+    # ------------------------------------------------------------------
+    # Observations
+    # ------------------------------------------------------------------
+
+    def _compute_obs(self):
+        s = self.obs_scales
+        return torch.cat(
+            [
+                # torch.clip(self.base_pos    * s["pos"],        -1, 1),   # 3
+                # torch.clip(self.target_pos  * s["target_pos"], -5, 5),   # 3
+                torch.clip(self.rel_pos     * s["rel_pos"],    -1, 1),   # 3
+                self.base_quat,                                            # 4
+                torch.clip(self.base_lin_vel * s["lin_vel"],   -1, 1),   # 3
+                torch.clip(self.base_ang_vel * s["ang_vel"],   -1, 1),   # 3
+                self.last_actions,                                         # 4
+            ],
+            dim=-1,
+        )  # total: 13
+
+    # ------------------------------------------------------------------
+    # Reward functions
+    # ------------------------------------------------------------------
+
+    def _reward_distance(self):
+        """Penalty proportional to distance from target."""
+        return torch.norm(self.rel_pos, dim=1)
+
+    # def _reward_close(self):
+    #     """Dense positive reward that peaks at the target: exp(-dist).
+    #     Gives the agent an explicit gradient toward the goal at all distances."""
+    #     return torch.exp(-torch.norm(self.rel_pos, dim=1))
+
+    def _reward_time(self):
+        return torch.ones(self.num_envs, device=gs.device, dtype=gs.tc_float)
+
+
+    def _reward_crash(self):
+        """Penalty on crash."""
+        rew = torch.zeros(self.num_envs, device=gs.device, dtype=gs.tc_float)
+        rew[self.crash_condition] = 1.0
+        return rew
+    
+    def _reward_success(self):
+        """Reward on success."""
+        rew = torch.zeros(self.num_envs, device=gs.device, dtype=gs.tc_float)
+        rew[self.success_condition] = 1.0
+        return rew
+
+    # def _reward_smooth(self):
+    #     """Penalty for jerky actions."""
+    #     return torch.sum(torch.square(self.actions - self.last_actions), dim=1)
+
+    # def _reward_yaw_rate(self):
+    #     """Penalty for spinning around the vertical axis."""
+    #     return torch.square(self.base_ang_vel[:, 2])

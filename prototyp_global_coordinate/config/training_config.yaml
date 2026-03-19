@@ -1,0 +1,58 @@
+env:
+  n_envs: 1
+  max_episode_steps: 2000
+  time_steps: 1000
+  dt: 0.01
+
+scene:
+  show_viewer: true
+  env_spacing: 10.0  # 80m x 80m per env to fit ±30m target range
+  visualize_target: true
+
+spawn:
+  height_min: 10.0        # drone spawn altitude minimum (m) — differs from prototyp_2 (was 6.0)
+  height_max: 20.0        # drone spawn altitude maximum (m) — differs from prototyp_2 (was 10.0)
+  target_range: 30.0      # target x/y sampled in [-30, +30] m
+  drone_offset_range: 10.0  # drone x/y offset from target: ±10m
+
+controller:
+  base_rpm: 1789.2  # URDF-derived: sqrt(0.714 * 9.81 / (4 * 5.47e-07))
+  max_rpm: 5000
+  debug: true       # record PID internals for plot_debug()
+  # kp_vel: 5.0
+  # kd_vel: 1.0
+  # kp_att: 10.0
+  # mass: 0.714
+  # gravity: 9.81
+  # vel_scale: 2.0          # action [-1,1] -> velocity m/s scaling
+  # yaw_scale: 1.0          # action [-1,1] -> yaw rate rad/s scaling
+
+  #[kp,ki,kd]
+  pid_params_pos_x: [1.0, 0, 0.7]
+  pid_params_pos_y: [1.0, 0, 0.7]
+  pid_params_pos_z: [1.5, 0, 1]
+  pid_params_vel_x: [16, 0, 8]
+  pid_params_vel_y: [16, 0, 8]
+  pid_params_vel_z: [100, 2, 10]
+  pid_params_roll:  [6, 0, 3]
+  pid_params_pitch: [6, 0, 3]
+  pid_params_yaw:   [1, 0, 0.2]
+
+  # pid_params_pos_x: [2.0, 0.0, 0.0]
+  # pid_params_pos_y: [2.0, 0.0, 0.0]
+  # pid_params_pos_z: [2.0, 0.0, 0.0]
+  # pid_params_vel_x: [20.0, 0.0, 20.0]
+  # pid_params_vel_y: [20.0, 0.0, 20.0]
+  # pid_params_vel_z: [25.0, 0.0, 20.0]
+  # pid_params_roll: [10.0, 0.0, 1.0]
+  # pid_params_pitch: [10.0, 0.0, 1.0]
+  # pid_params_yaw: [2.0, 0.0, 0.2]
+
+
+
+
+
+
+
+# reward: {}  # populated in Phase 2
+# ppo: {}     # populated in Phase 3

@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="draugas">
+
+  <properties 
+    kf="5.47e-07" 
+    km="1.0e-08" 
+    arm="0.105" 
+    thrust2weight="2.25" />
+
+  <!-- ================= Main Body (dynamic) ================= -->
+  <link name="main_body">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.714"/>
+      <inertia ixx="0.00239891199763722" iyy="0.0023161492566385" izz="0.00305506098082551"
+               ixy="-1.50554233565596e-07" ixz="-0.000126427277030229" iyz="3.18575210507504e-08"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/main_body.dae"/>
+      </geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/main_body.dae"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ================= Rotors ================= -->
+  <link name="prop0_link">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.0323 -0.0323 0.0132" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/prop_5inch.dae"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <link name="prop1_link">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.0323 -0.0323 0.0132" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/prop_5inch.dae"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <link name="prop2_link">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="-0.0323 0.0323 0.0132" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/prop_5inch.dae"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <link name="prop3_link">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0.0323 0.0323 0.0132" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/prop_5inch.dae"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <!-- ================= Rotor Joints (fixed) ================= -->
+  <joint name="prop0_joint" type="fixed">
+    <parent link="main_body"/>
+    <child link="prop0_link"/>
+    <origin xyz="-0.074246 -0.074246 0.0099" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="prop1_joint" type="fixed">
+    <parent link="main_body"/>
+    <child link="prop1_link"/>
+    <origin xyz="0.074246 -0.074246 0.0099" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="prop2_joint" type="fixed">
+    <parent link="main_body"/>
+    <child link="prop2_link"/>
+    <origin xyz="0.074246 0.074246 0.0099" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="prop3_joint" type="fixed">
+    <parent link="main_body"/>
+    <child link="prop3_link"/>
+    <origin xyz="-0.074246 0.074246 0.0099" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ================= Flight Controller ================= -->
+  <link name="fc">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+  </link>
+
+  <joint name="main_body2fc" type="fixed">
+    <parent link="main_body"/>
+    <child link="fc"/>
+    <origin xyz="0 0 0.012798" rpy="0 0 0.7854"/>
+  </joint>
+
+  <!-- ================= Lidar/IMU ================= -->
+  <link name="lidar_imu">
+    <inertial>
+      <mass value="0"/>
+      <inertia ixx="0" iyy="0" izz="0" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.0567491" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="meshes/lidar_imu.dae"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <joint name="main_body2lidar_imu" type="fixed">
+    <parent link="main_body"/>
+    <child link="lidar_imu"/>
+    <origin xyz="0 0 0.0567491" rpy="0 0 0"/>
+  </joint>
+
+</robot>

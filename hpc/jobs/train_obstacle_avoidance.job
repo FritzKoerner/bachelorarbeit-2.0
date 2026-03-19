@@ -1,0 +1,53 @@
+#!/bin/bash
+#SBATCH --job-name=genesis-obstacle-avoid
+#SBATCH --partition=paula
+#SBATCH --gpus=a30:1
+#SBATCH --mem=64G
+#SBATCH --cpus-per-task=16
+#SBATCH --time=48:00:00
+#SBATCH --output=%x-slurm-%j.out
+#SBATCH --error=%x-slurm-%j.err
+#SBATCH --mail-type=END,FAIL
+
+# ==============================================================================
+# Obstacle Avoidance — PPO training with CNN depth on HPC
+#
+# NOTE: CNN depth rollouts use significantly more GPU memory than the MLP-only
+# global coordinate prototype. Batch size 512 is conservative for A30 (24GB).
+# Monitor GPU memory with nvidia-smi and increase if headroom allows.
+#
+# Submit: sbatch train_obstacle_avoidance.job
+# Monitor: squeue -u $USER
+# Cancel: scancel <jobid>
+# ==============================================================================
+
+# --- Environment ---
+module purge
+module load Anaconda3
+module load CUDA/12.6.0
+eval "$(conda shell.bash hook)"
+conda activate ba_v04
+
+# --- Use workspace if available, otherwise home ---
+GENESIS_DIR="$HOME/genesis_v04"
+if [ -d "/work/$USER/genesis-training" ]; then
+    WORK_DIR="/work/$USER/genesis-training"
+    mkdir -p "$WORK_DIR/prototyp_obstacle_avoidance/logs"
+    ln -sfn "$WORK_DIR/prototyp_obstacle_avoidance/logs" \
+            "$GENESIS_DIR/prototyp_obstacle_avoidance/logs"
+    echo "Using workspace: $WORK_DIR"
+fi
+
+# --- Training ---
+cd "$GENESIS_DIR/prototyp_obstacle_avoidance"
+
+echo "=== Job started: $(date) ==="
+echo "Host: $(hostname)"
+echo "GPU:  $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
+echo "Training: train_rl.py -B 512 --max_iterations 401"
+echo ""
+
+python train_rl.py -B 512 --max_iterations 401
+
+echo ""
+echo "=== Job complete: $(date) ==="
