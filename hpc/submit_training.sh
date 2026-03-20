@@ -23,13 +23,13 @@ set -e
 source "$(dirname "$0")/_output.sh"
 
 # --- Defaults ---
-PARTITION="clara"
-GPU_TYPE="v100"
+PARTITION="paula"
+GPU_TYPE="a30"
 GPU_COUNT=1
-HOURS=3
+HOURS=12
 MEM="64G"
 CPUS=16
-BATCH=4096
+BATCH=64
 ITERS=401
 USE_WANDB=true
 
@@ -49,7 +49,7 @@ shift
 # --- Per-prototype defaults ---
 if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
     BATCH=16
-    ITERS=70000
+    ITERS=15000
 fi
 
 # --- Parse options ---
@@ -128,6 +128,9 @@ module load Anaconda3
 module load CUDA/12.6.0
 eval "\$(conda shell.bash hook)"
 conda activate ba_v04
+
+# Pin Vulkan to NVIDIA ICD — prevents Madrona abort() from incompatible ICDs
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
 
 # --- Training ---
 cd ${PROTO_DIR}

@@ -111,6 +111,8 @@ class ObstacleAvoidanceEnv:
         else:
             use_batch = False
         self._using_batch_renderer = use_batch
+        renderer_name = "BatchRenderer" if use_batch else "Rasterizer"
+        print(f"[ObstacleAvoidanceEnv] Renderer: {renderer_name} (cfg={cfg_val!r})")
 
         scene_kwargs = dict(
             sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),

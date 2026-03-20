@@ -26,6 +26,17 @@ module load CUDA/12.6.0
 
 eval "$(conda shell.bash hook)"
 
+# Pin Vulkan loader to NVIDIA ICD only.
+# HPC nodes have 5 ICDs (Intel, lavapipe, radeon, NVIDIA) registered system-wide.
+# Without this, Madrona's vkCreateInstance hits an incompatible driver and abort()s.
+if [ -f /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json ]; then
+    export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
+elif [ -f /usr/share/vulkan/icd.d/nvidia_icd.json ]; then
+    export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+elif [ -f /etc/vulkan/icd.d/nvidia_icd.json ]; then
+    export VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json
+fi
+
 # ==============================================================================
 # 2. QUICK RELOAD MODE
 # ==============================================================================

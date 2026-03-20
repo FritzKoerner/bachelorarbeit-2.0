@@ -24,6 +24,9 @@ module load CUDA/12.6.0
 eval "$(conda shell.bash hook)"
 conda activate ba_v04
 
+# Pin Vulkan to NVIDIA ICD — prevents Madrona abort() from incompatible ICDs
+export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
+
 # --- Use workspace if available, otherwise home ---
 GENESIS_DIR="$HOME/genesis_v04"
 if [ -d "/work/$USER/genesis-training" ]; then
