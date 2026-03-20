@@ -115,8 +115,8 @@ def get_cfgs():
         "obstacle_size": [1.0, 1.0, 2.0],
         "obstacle_x_range": [-8.0, 12.0],
         "obstacle_y_range": [-8.0, 12.0],
-        "collision_radius": 0.3,
-        "safety_radius": 3.0,
+        "collision_radius": 0.5,
+        "safety_radius": 1.0,
         # Post-curriculum strategic placement
         "n_corridor_obstacles": 3,
         "n_ring_obstacles": 4,
@@ -153,7 +153,7 @@ def get_cfgs():
     obs_cfg = {
         "num_state_obs": 17,
         "depth_res": 64,
-        "depth_stack_size": 3,
+        "depth_stack_size": 1,
         "obs_scales": {
             "rel_pos": 1 / 15.0,
             "lin_vel": 1 / 5.0,
