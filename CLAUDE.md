@@ -48,7 +48,8 @@ Conda environment: `ba_v04`. Key packages: `genesis-world==0.4.3` (installs `qua
 ### Changes from v0.3.13
 
 - **`get_link("main_body")`** for URDF root link reference. v0.4.3's improved URDF parser no longer wraps root as "base" — use the actual URDF link name.
-- **Quadrants backend** replaces Taichi. 30%+ faster collision, improved URDF parsing.
+- **Quadrants backend** (`quadrants==0.4.4`) replaces Taichi (GsTaichi). 30%+ faster collision, improved URDF parsing. Transparent to user code — `gs.init(backend=gs.gpu)` unchanged. Env variable prefix changed from `TI_` to `QD_` (e.g., `QD_NUM_THREADS`). Expect one-time JIT recompilation on first run (new kernel cache).
+- **ProximitySensor** (new in v0.4.3): `gs.sensors.Proximity` — measures closest mesh surface distance from probe points. Uses triangle-based queries O(probes × triangles × envs). Not beneficial for our box-obstacle avoidance — manual AABB checks are faster and simpler.
 - **Legacy URDF parser fallback** for `.dae` meshes — works but shows a warning.
 - **CoACD convex decomposition** runs automatically on first build (~60s for drone mesh, 60 convex hulls). Cached for subsequent runs.
 
@@ -66,7 +67,9 @@ Conda environment: `ba_v04`. Key packages: `genesis-world==0.4.3` (installs `qua
 - **`gs.morphs.Box` with `fixed=True`**: supports per-env `set_pos(new_pos, envs_idx=idx, zero_velocity=True)` for obstacle randomization. Use `collision=False` when handling collisions via distance checks.
 - **BatchRenderer requires Madrona Vulkan backend** — crashes with `abort()` on Volta and older GPUs (not a Python exception). Check `torch.cuda.get_device_capability() >= (7, 5)` before attempting. Turing+ required. Use Rasterizer with `env_separate_rigid=True` as fallback.
 - **Rasterizer does NOT support batched cameras** — `_is_batched=False`, rejects `set_pose(transform=(N,4,4))`. Use `env_separate_rigid=True` which renders all envs in one `render()` call, returning `(n_rendered_envs, H, W)` in local env coordinates.
-- **Rasterizer `env_separate_rigid` depth bug**: `depth[i]` for i>0 always shows env 0's rigid bodies, not env i's. Workaround: swap env 0's obstacle positions to match env_i via `set_pos(envs_idx=[0])` before each render, extract `depth[0]`. `set_pos()` updates Rasterizer visuals immediately — no `scene.step()` needed.
+- **Rasterizer `env_separate_rigid` depth bug (confirmed v0.3.13 – v0.4.3)**: `depth[i]` for i>0 always shows env 0's rigid bodies, not env i's. Root cause: `glDrawElementsInstancedBaseInstance()` requires OpenGL 4.2; GPUs with only 4.1 (V100) silently render all envs' rigid bodies. Workaround: swap env 0's obstacle positions to match env_i via `set_pos(envs_idx=[0])` before each render, extract `depth[0]`. `set_pos()` updates Rasterizer visuals immediately — no `scene.step()` needed.
+- **Depth bug fix on `main` (post-v0.4.3)**: PR #2560 (March 17 2026, one day after v0.4.3 release) adds OpenGL 4.1 fallback. Also enables batched camera poses for Rasterizer. To use: `pip install genesis-world@git+https://github.com/Genesis-Embodied-AI/Genesis.git@main`. Would eliminate the obstacle-swap workaround in `_render_depth_rasterizer()`.
+- **v0.4.3 warning**: "Batched rendering via VisOptions.env_separate_rigid=True is only partially supported by Rasterizer" — cosmetic, the obstacle-swap workaround still works correctly.
 - **`scene.envs_offset`**: `(n_envs, 3)` numpy array of per-env world-space offsets after `scene.build()`. Camera `set_pose()` in Rasterizer uses local env coordinates, not world.
 - **Non-batched `camera.render(depth=True)`** returns numpy `(H, W)` arrays, not torch tensors. Wrap with `torch.as_tensor(depth, dtype=gs.tc_float, device=gs.device)`.
 - **Eval reward accumulation must use GPU tensors** — `env.step()` returns rewards on `gs.device`. Accumulator tensors (`ep_reward`) must be on the same device, not CPU.
@@ -136,7 +139,7 @@ Key files (mirrors `prototyp_global_coordinate/` structure):
 - `debug_depth.py` — Validates depth camera rendering and CNN gradient flow
 - `visualize_obstacle_setup.py` — Validates strategic obstacle placement effectiveness
 
-**Observations**: `TensorDict({"state": (n, 17), "depth": (n, 1, 64, 64)})`. State is identical 17-dim vector; depth is forward-facing (45 deg downward tilt), normalized `clamp(depth / 20, 0, 1)`.
+**Observations**: `TensorDict({"state": (n, 17), "depth": (n, 3, 64, 64)})`. State is identical 17-dim vector; depth is forward-facing (45 deg downward tilt), 3-frame stack, normalized `clamp(depth / 20, 0, 1)`.
 
 **Depth camera**: 45 deg downward tilt (body-frame), 90 deg FOV, 0.1m below drone center. Dual-path rendering: BatchRenderer uses `camera.attach()` + `move_to_attach()` (single call for all envs); Rasterizer uses per-env serial loop with obstacle position swapping. `use_batch_renderer` config: `"auto"` (default), `True`/`"batch"`, `False`/`"rasterizer"`.
 
@@ -144,7 +147,7 @@ Key files (mirrors `prototyp_global_coordinate/` structure):
 
 **Obstacles**: 8 `gs.morphs.Box(1x1x2m)`, distance-based collision (radius 0.3m), obstacle proximity penalty within safety radius (3.0m). Post-curriculum uses strategic placement with 1 guaranteed path blocker on the spawn->target line; curriculum phase uses sparse random placement.
 
-**Rewards**: distance (-5), time (-0.5), obstacle_proximity (-10), crash (-100), obstacle_collision (-150), success (+200). Per-step rewards scaled by dt.
+**Rewards**: distance (-5), time (-0.5), obstacle_proximity (-30), crash (-100), obstacle_collision (-150), success (+200). Per-step rewards scaled by dt.
 
 ## Running on HPC (Leipzig cluster)
 
