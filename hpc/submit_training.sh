@@ -1,75 +1,130 @@
 #!/bin/bash
 # ==============================================================================
-# Submit a training job to the HPC Leipzig SLURM scheduler
+# Interactive SLURM job submission for Genesis RL training
 #
 # Usage:
-#   ./submit_training.sh global_coordinate
-#   ./submit_training.sh global_coordinate --batch 4096 --iters 401 --hours 48
-#   ./submit_training.sh obstacle_avoidance --partition paula --gpu-type a30 --hours 24 --batch 512
-#
-# Options:
-#   --partition  PARTITION   Cluster partition (default: clara)
-#   --gpu-type   TYPE        GPU type (default: v100)
-#   --gpus       N           Number of GPUs (default: 1)
-#   --hours      H           Time limit in hours (default: 3)
-#   --mem        MEM         Memory (default: 64G)
-#   --cpus       N           CPUs per task (default: 16)
-#   --batch      B           Batch size / num envs (default: 4096)
-#   --iters      N           Max iterations (default: 401)
-#   --no-wandb               Use train_rl.py instead of train_rl_wb.py
+#   ./submit_training.sh              # fully interactive
 # ==============================================================================
 
 set -e
 source "$(dirname "$0")/_output.sh"
 
-# --- Defaults ---
-PARTITION="paula"
-GPU_TYPE="a30"
-GPU_COUNT=1
-HOURS=12
-MEM="64G"
-CPUS=16
-BATCH=64
-ITERS=401
-USE_WANDB=true
+# --- Prompt helper ---
+# Usage: ask "Label" "default_value"  →  sets REPLY (or default if empty)
+ask() {
+    local label="$1"
+    local default="$2"
+    local input
+    printf "   ${DIM}%-20s${RESET}${CYAN}[${default}]${RESET}: " "$label"
+    read -r input
+    REPLY="${input:-$default}"
+}
 
-# --- Parse prototype name ---
-if [ -z "$1" ] || [[ "$1" == --* ]]; then
-    banner "Submit Training Job" "$RED"
-    fail "Missing prototype name"
-    echo ""
-    echo -e "   ${DIM}Usage:${RESET} ./submit_training.sh ${CYAN}<prototype>${RESET} [options]"
-    echo -e "   ${DIM}Prototypes:${RESET} global_coordinate, obstacle_avoidance"
-    echo ""
-    exit 1
-fi
-PROTOTYPE="$1"
-shift
+# --- Prompt yes/no ---
+# Usage: ask_yn "Label" "Y"  →  REPLY is "true" or "false"
+ask_yn() {
+    local label="$1"
+    local default="$2"  # Y or n
+    local hint
+    if [ "$default" = "Y" ]; then
+        hint="Y/n"
+    else
+        hint="y/N"
+    fi
+    local input
+    printf "   ${DIM}%-20s${RESET}${CYAN}[${hint}]${RESET}: " "$label"
+    read -r input
+    input="${input:-$default}"
+    case "$input" in
+        [Yy]*) REPLY="true" ;;
+        *)     REPLY="false" ;;
+    esac
+}
+
+banner "Submit Training Job" "$MAGENTA"
+
+# ╔══════════════════════════════════════╗
+# ║  1. Prototype selection              ║
+# ╚══════════════════════════════════════╝
+section "Prototype"
+echo -e "   ${WHITE}1)${RESET} global_coordinate"
+echo -e "   ${WHITE}2)${RESET} obstacle_avoidance"
+printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
+read -r proto_choice
+case "${proto_choice:-1}" in
+    2) PROTOTYPE="obstacle_avoidance" ;;
+    *) PROTOTYPE="global_coordinate" ;;
+esac
 
 # --- Per-prototype defaults ---
-if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
-    BATCH=16
-    ITERS=15000
-fi
+case "$PROTOTYPE" in
+    obstacle_avoidance)
+        DEF_BATCH=32
+        DEF_ITERS=15000
+        ;;
+    *)
+        DEF_BATCH=4096
+        DEF_ITERS=401
+        ;;
+esac
+DEF_EXP_NAME="genesis-${PROTOTYPE}"
 
-# --- Parse options ---
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --partition)  PARTITION="$2"; shift 2 ;;
-        --gpu-type)   GPU_TYPE="$2"; shift 2 ;;
-        --gpus)       GPU_COUNT="$2"; shift 2 ;;
-        --hours)      HOURS="$2"; shift 2 ;;
-        --mem)        MEM="$2"; shift 2 ;;
-        --cpus)       CPUS="$2"; shift 2 ;;
-        --batch)      BATCH="$2"; shift 2 ;;
-        --iters)      ITERS="$2"; shift 2 ;;
-        --no-wandb)   USE_WANDB=false; shift ;;
-        *)
-            fail "Unknown option: $1"
-            exit 1
-            ;;
-    esac
-done
+# ╔══════════════════════════════════════╗
+# ║  2. Experiment name                  ║
+# ╚══════════════════════════════════════╝
+section "Experiment"
+ask "Name" "$DEF_EXP_NAME"
+EXP_NAME="$REPLY"
+
+# ╔══════════════════════════════════════╗
+# ║  3. Training parameters              ║
+# ╚══════════════════════════════════════╝
+section "Training Parameters"
+ask "Batch size" "$DEF_BATCH"
+BATCH="$REPLY"
+
+ask "Max iterations" "$DEF_ITERS"
+ITERS="$REPLY"
+
+ask "Seed" "0"
+SEED="$REPLY"
+
+ask_yn "W&B logging" "Y"
+USE_WANDB="$REPLY"
+
+# ╔══════════════════════════════════════╗
+# ║  4. Cluster resources                ║
+# ╚══════════════════════════════════════╝
+section "Cluster Resources"
+echo -e "   ${DIM}Partitions: paula (A30), clara (V100), clara-long (V100 10d)${RESET}"
+ask "Partition" "paula"
+PARTITION="$REPLY"
+
+# Set GPU type default based on partition
+case "$PARTITION" in
+    paula)      DEF_GPU="a30" ;;
+    clara*)     DEF_GPU="v100" ;;
+    *)          DEF_GPU="a30" ;;
+esac
+
+ask "GPU type" "$DEF_GPU"
+GPU_TYPE="$REPLY"
+
+ask "GPU count" "1"
+GPU_COUNT="$REPLY"
+
+ask "Memory" "64G"
+MEM="$REPLY"
+
+ask "CPUs" "16"
+CPUS="$REPLY"
+
+ask "Time limit (hours)" "12"
+HOURS="$REPLY"
+
+# ╔══════════════════════════════════════╗
+# ║  5. Confirmation                     ║
+# ╚══════════════════════════════════════╝
 
 # --- Resolve paths ---
 GENESIS_DIR="$HOME/genesis_v04"
@@ -78,30 +133,41 @@ LOG_DIR="${GENESIS_DIR}/logs"
 
 # Pick training script
 TRAIN_SCRIPT="train_rl.py"
-if [ "$USE_WANDB" = true ] && [ -f "${PROTO_DIR}/train_rl_wb.py" ]; then
+if [ "$USE_WANDB" = "true" ] && [ -f "${PROTO_DIR}/train_rl_wb.py" ]; then
     TRAIN_SCRIPT="train_rl_wb.py"
 fi
 
-JOB_NAME="genesis-${PROTOTYPE}"
+# Build training command args
+TRAIN_ARGS="-e ${EXP_NAME} -B ${BATCH} --max_iterations ${ITERS}"
+if [ "$SEED" != "0" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --seed ${SEED}"
+fi
 
-banner "Submit Training Job" "$MAGENTA"
+JOB_NAME="${EXP_NAME}"
 
-section "Job Configuration"
+section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
+info "Experiment" "$EXP_NAME"
 info "Script" "$TRAIN_SCRIPT"
-info "Job name" "$JOB_NAME"
-
-section "Cluster Resources"
+info "Command" "python ${TRAIN_SCRIPT} ${TRAIN_ARGS}"
+echo ""
 info "Partition" "$PARTITION"
 info "GPU" "${GPU_TYPE} x${GPU_COUNT}"
 info "Memory" "$MEM"
 info "CPUs" "$CPUS"
 info "Time limit" "${HOURS}h"
-
-section "Training Parameters"
+echo ""
 info "Batch size" "$BATCH envs"
 info "Iterations" "$ITERS"
-info "W&B logging" "$([ "$USE_WANDB" = true ] && echo 'enabled' || echo 'disabled')"
+info "Seed" "$SEED"
+info "W&B logging" "$([ "$USE_WANDB" = "true" ] && echo 'enabled' || echo 'disabled')"
+
+echo ""
+printf "   ${BOLD}Submit this job?${RESET} ${CYAN}[Y/n]${RESET}: "
+read -r confirm
+case "${confirm:-Y}" in
+    [Nn]*) echo -e "\n   ${DIM}Cancelled.${RESET}\n"; exit 0 ;;
+esac
 
 # --- Ensure log directory exists on HPC ---
 section "Submitting" "$SYM_ROCKET"
@@ -136,8 +202,9 @@ export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
 cd ${PROTO_DIR}
 echo "=== Starting training: \$(date) ==="
 echo "Host: \$(hostname), GPU: \$(nvidia-smi --query-gpu=name --format=csv,noheader)"
+echo "Experiment: ${EXP_NAME}, Seed: ${SEED}"
 
-python ${TRAIN_SCRIPT} -B ${BATCH} --max_iterations ${ITERS}
+python ${TRAIN_SCRIPT} ${TRAIN_ARGS}
 
 echo "=== Training complete: \$(date) ==="
 SLURM_EOF
@@ -147,5 +214,6 @@ rm "$JOBSCRIPT"
 
 spin_run "Submitting to SLURM..." sbatch "${LOG_DIR}/${JOB_NAME}.sh"
 
-done_banner "Job submitted"
+done_banner "Job submitted: ${EXP_NAME}"
 hint "Monitor with: squeue -u \$USER"
+hint "Logs: ${LOG_DIR}/slurm-<jobid>.out"
