@@ -252,6 +252,8 @@ def log_to_wandb(results: list[dict], stats: dict, fig: plt.Figure, ckpt_iter: i
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name",   type=str, default="obstacle-avoidance")
+    parser.add_argument("--log_dir",          type=str, default=None,
+                        help="Direct path to log dir (overrides --exp_name)")
     parser.add_argument("--ckpt",             type=int, default=None,
                         help="Checkpoint iteration (default: latest)")
     parser.add_argument("--num_envs",         type=int, default=50)
@@ -261,7 +263,7 @@ def main():
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
 
-    log_dir = f"logs/{args.exp_name}"
+    log_dir = args.log_dir if args.log_dir else f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, train_cfg = pickle.load(
         open(f"{log_dir}/cfgs.pkl", "rb")
     )
@@ -332,6 +334,9 @@ if __name__ == "__main__":
 """
 # Evaluate latest checkpoint, log to W&B
 python eval_rl_wb.py
+
+# Evaluate HPC results
+python eval_rl_wb.py --log_dir ../hpc_results/prototyp_obstacle_avoidance/my_run
 
 # Evaluate specific checkpoint
 python eval_rl_wb.py --ckpt 300

@@ -12,6 +12,7 @@ import torch
 from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 from envs.obstacle_avoidance_env import ObstacleAvoidanceEnv
+from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl from W&B training
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +178,8 @@ def save_plots(results: list[dict], out_dir: str) -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name",   type=str, default="obstacle-avoidance")
+    parser.add_argument("--log_dir",          type=str, default=None,
+                        help="Direct path to log dir (overrides --exp_name)")
     parser.add_argument("--ckpt",             type=int, default=300)
     parser.add_argument("--num_envs",         type=int, default=50)
     parser.add_argument("--num_episodes",     type=int, default=100)
@@ -185,7 +188,7 @@ def main():
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
 
-    log_dir = f"logs/{args.exp_name}"
+    log_dir = args.log_dir if args.log_dir else f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, train_cfg = pickle.load(
         open(f"{log_dir}/cfgs.pkl", "rb")
     )
@@ -236,6 +239,7 @@ if __name__ == "__main__":
 
 """
 python eval_rl.py --ckpt 300
+python eval_rl.py --log_dir ../hpc_results/prototyp_obstacle_avoidance/my_run --ckpt 400
 python eval_rl.py --ckpt 300 --num_episodes 200 --num_envs 100
 python eval_rl.py --ckpt 300 --vis
 """
