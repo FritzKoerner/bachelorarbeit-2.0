@@ -84,7 +84,7 @@ def get_cfgs():
         "num_actions": 4,
         "episode_length_s": 30.0,
         # Action scaling: maps [-1,1] → offset from current drone position (metres).
-        "action_scales": [3.0, 3.0, 3.0],
+        "action_scales": [6.0, 6.0, 6.0],
         # Drone spawn randomisation
         "spawn_offset": 5.0,        # drone x/y in [-5, +5] m
         "spawn_height_min": 10.0,
@@ -131,8 +131,8 @@ def get_cfgs():
     obs_cfg = {
         "num_obs": 17,
         "obs_scales": {
-            "rel_pos":    1 / 30.0,
-            "lin_vel":    1 / 5.0,
+            "rel_pos":    1 / 15.0,
+            "lin_vel":    1 / 2.5,
             "ang_vel":    1 / 3.14159,
         },
     }

@@ -25,19 +25,21 @@ class DictConfig(dict):
 def get_train_cfg(exp_name, max_iterations):
     return {
         # Runner-level
-        "num_steps_per_env": 64,
+        "num_steps_per_env":256,
         "save_interval": 100,
+        "max_iterations": max_iterations,
 
         # W&B logging
         "logger": "wandb",
         "wandb_project": "obstacle-avoidance",
+        "experiment_name": exp_name,
 
         # Algorithm
         "algorithm": {
             "class_name": "PPO",
             "clip_param": 0.2,
             "desired_kl": 0.01,
-            "entropy_coef": 0.001,
+            "entropy_coef": 0.01,
             "gamma": 0.99,
             "lam": 0.95,
             "learning_rate": 3e-4,
@@ -104,7 +106,7 @@ def get_cfgs():
         "target_y_range": [3.0, 3.0],
         "target_z_range": [1.0, 1.0],
         # Curriculum (obstacle density only — target always uses configured ranges)
-        "curriculum_steps": 3000,
+        "curriculum_steps": 240000,
         "curriculum_n_obstacles": 5,
         # Success
         "hover_radius": 0.3,
@@ -115,7 +117,7 @@ def get_cfgs():
         "obstacle_size": [1.0, 1.0, 2.0],
         "obstacle_x_range": [-8.0, 12.0],
         "obstacle_y_range": [-8.0, 12.0],
-        "collision_radius": 0.5,
+        "collision_radius": 0.3,
         "safety_radius": 1.0,
         # Post-curriculum strategic placement
         "n_corridor_obstacles": 3,
@@ -155,7 +157,7 @@ def get_cfgs():
         "depth_res": 64,
         "depth_stack_size": 1,
         "obs_scales": {
-            "rel_pos": 1 / 15.0,
+            "rel_pos": 1 / 30.0,
             "lin_vel": 1 / 5.0,
             "ang_vel": 1 / 3.14159,
         },
@@ -165,7 +167,7 @@ def get_cfgs():
         "reward_scales": {
             "distance":            -5.0,
             "time":                -0.5,
-            "obstacle_proximity": -30.0,
+            "obstacle_proximity": -6.0,
             "crash":             -100.0,
             "obstacle_collision": -150.0,
             "success":            200.0,
