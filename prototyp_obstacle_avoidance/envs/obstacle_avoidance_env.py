@@ -302,6 +302,12 @@ class ObstacleAvoidanceEnv:
 
         self.global_step = 0
         self.extras = {}
+
+        # Debug / monitoring accumulators (logged via extras["episode"])
+        self.action_saturated_count = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
+        self.action_sum    = torch.zeros((self.num_envs, self.num_actions), device=gs.device, dtype=gs.tc_float)
+        self.obs_clipped_count = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
+
         self._built = True
 
         self.reset()
@@ -501,6 +507,10 @@ class ObstacleAvoidanceEnv:
     def step(self, actions):
         self.actions = torch.clip(actions, -1.0, 1.0)
 
+        # Accumulate debug metrics
+        self.action_sum += self.actions
+        self.action_saturated_count += (torch.abs(self.actions) > 0.99).any(dim=1).float()
+
         scales = self.env_cfg["action_scales"]
         target_x   = self.base_pos[:, 0] + self.actions[:, 0] * scales[0]
         target_y   = self.base_pos[:, 1] + self.actions[:, 1] * scales[1]
@@ -567,9 +577,11 @@ class ObstacleAvoidanceEnv:
 
         # Rewards BEFORE reset
         self.rew_buf[:] = 0.0
+        self.reward_components = {}
         for name, reward_func in self.reward_functions.items():
             rew = reward_func() * self.reward_scales[name]
             self.rew_buf += rew
+            self.reward_components[name] = rew
             self.episode_sums[name] += rew
 
         # Auto-reset AFTER rewards, BEFORE obs
@@ -578,6 +590,12 @@ class ObstacleAvoidanceEnv:
         # Observations (post-reset)
         obs = self._compute_obs()
         self.last_actions[:] = self.actions[:]
+
+        # Detect obs clipping (any scaled dim at ±1 boundary)
+        clipped = (self.state_buf[:, :3].abs().gt(0.99).any(dim=1)
+                   | self.state_buf[:, 7:13].abs().gt(0.99).any(dim=1))
+        self.obs_clipped_count += clipped.float()
+
         return obs, self.rew_buf, self.reset_buf, self.extras
 
     def reset_idx(self, envs_idx):
@@ -608,8 +626,13 @@ class ObstacleAvoidanceEnv:
         oz_val = self.obstacle_size[2] / 2.0  # half-height so base sits on ground
 
         if self.global_step < curriculum_steps:
-            # Curriculum: sparse random placement
-            self._place_obstacles_random(envs_idx, spawn_pos, n, oz_val)
+            # Curriculum: no obstacles (learn navigation first)
+            # Move entities underground so depth camera sees clear space too
+            underground = torch.zeros((n, 3), device=gs.device, dtype=gs.tc_float)
+            underground[:, 2] = -100.0
+            for i, obs_entity in enumerate(self.obstacles):
+                obs_entity.set_pos(underground, envs_idx=envs_idx, zero_velocity=True)
+                self.obstacle_positions[envs_idx, i] = underground
         else:
             # Post-curriculum: strategic placement with guaranteed blocker
             self._place_obstacles_strategic(envs_idx, spawn_pos, n, oz_val)
@@ -650,6 +673,28 @@ class ObstacleAvoidanceEnv:
                 / self.env_cfg["episode_length_s"]
             )
             self.episode_sums[key][envs_idx] = 0.0
+
+        # Debug / monitoring metrics
+        ep_len = self.episode_length_buf[envs_idx].float().clamp(min=1)
+        mean_ep_len = ep_len.mean()
+        self.extras["episode"]["terminal_dist"] = torch.norm(
+            self.rel_pos[envs_idx], dim=1
+        ).mean().item()
+        self.extras["episode"]["action_saturation_rate"] = (
+            self.action_saturated_count[envs_idx].mean() / mean_ep_len
+        ).item()
+        self.extras["episode"]["obs_clip_rate"] = (
+            self.obs_clipped_count[envs_idx].mean() / mean_ep_len
+        ).item()
+        action_names = ["ax", "ay", "az", "ayaw"]
+        action_mean = self.action_sum[envs_idx] / mean_ep_len
+        for i, name in enumerate(action_names):
+            self.extras["episode"][f"action_mean_{name}"] = action_mean[:, i].mean().item()
+
+        # Reset accumulators
+        self.action_saturated_count[envs_idx] = 0.0
+        self.action_sum[envs_idx] = 0.0
+        self.obs_clipped_count[envs_idx] = 0.0
 
     def reset(self):
         self.reset_buf[:] = True

@@ -181,6 +181,12 @@ class CoordinateLandingEnv:
         self.global_step = 0  # counts calls to step(); used for curriculum
 
         self.extras = {}
+
+        # Debug / monitoring accumulators (logged via extras["episode"])
+        self.action_saturated_count = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
+        self.action_sum    = torch.zeros((self.num_envs, self.num_actions), device=gs.device, dtype=gs.tc_float)
+        self.obs_clipped_count = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
+
         self._built = True
 
         # Reset all envs so the runner sees valid state from get_observations().
@@ -193,6 +199,10 @@ class CoordinateLandingEnv:
 
     def step(self, actions):
         self.actions = torch.clip(actions, -1.0, 1.0)
+
+        # Accumulate debug metrics
+        self.action_sum += self.actions
+        self.action_saturated_count += (torch.abs(self.actions) > 0.99).any(dim=1).float()
 
         # Map RL actions → small offsets from the current drone position.
         # The PID target is always nearby, preventing aggressive chasing.
@@ -255,9 +265,11 @@ class CoordinateLandingEnv:
         # Compute rewards BEFORE reset so they reflect the terminal state,
         # not the new episode's initial state.
         self.rew_buf[:] = 0.0
+        self.reward_components = {}
         for name, reward_func in self.reward_functions.items():
             rew = reward_func() * self.reward_scales[name]
             self.rew_buf += rew
+            self.reward_components[name] = rew
             self.episode_sums[name] += rew
 
         # Auto-reset done envs AFTER rewards but BEFORE observations,
@@ -267,6 +279,11 @@ class CoordinateLandingEnv:
         # Compute observations (post-reset for done envs)
         self.obs_buf = self._compute_obs()
         self.last_actions[:] = self.actions[:]
+
+        # Detect obs clipping (rel_pos dims 0:3, lin_vel dims 7:10, ang_vel dims 10:13)
+        clipped = (self.obs_buf[:, :3].abs().gt(0.99).any(dim=1)
+                   | self.obs_buf[:, 7:13].abs().gt(0.99).any(dim=1))
+        self.obs_clipped_count += clipped.float()
 
         obs = self.get_observations()
         return obs, self.rew_buf, self.reset_buf, self.extras
@@ -333,6 +350,28 @@ class CoordinateLandingEnv:
                 / self.env_cfg["episode_length_s"]
             )
             self.episode_sums[key][envs_idx] = 0.0
+
+        # Debug / monitoring metrics
+        ep_len = self.episode_length_buf[envs_idx].float().clamp(min=1)
+        mean_ep_len = ep_len.mean()
+        self.extras["episode"]["terminal_dist"] = torch.norm(
+            self.rel_pos[envs_idx], dim=1
+        ).mean().item()
+        self.extras["episode"]["action_saturation_rate"] = (
+            self.action_saturated_count[envs_idx].mean() / mean_ep_len
+        ).item()
+        self.extras["episode"]["obs_clip_rate"] = (
+            self.obs_clipped_count[envs_idx].mean() / mean_ep_len
+        ).item()
+        action_names = ["ax", "ay", "az", "ayaw"]
+        action_mean = self.action_sum[envs_idx] / mean_ep_len
+        for i, name in enumerate(action_names):
+            self.extras["episode"][f"action_mean_{name}"] = action_mean[:, i].mean().item()
+
+        # Reset accumulators
+        self.action_saturated_count[envs_idx] = 0.0
+        self.action_sum[envs_idx] = 0.0
+        self.obs_clipped_count[envs_idx] = 0.0
 
     def reset(self):
         self.reset_buf[:] = True
