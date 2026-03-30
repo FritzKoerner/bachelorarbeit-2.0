@@ -1,0 +1,65 @@
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+wandb: WARNING `start_method` is deprecated and will be removed in a future version of wandb. This setting is currently non-functional and safely ignored.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/sc.uni-leipzig.de/fk67rahe/.netrc.
+wandb: Currently logged in as: koe-f (koe-f-no) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run qnv8kcgf
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/wandb/run-20260325_165100-qnv8kcgf
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run increased_steps_per_env
+wandb: ⭐️ View project at https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: 🚀 View run at https://wandb.ai/koe-f-no/obstacle-avoidance/runs/qnv8kcgf
+Traceback (most recent call last):
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/train_rl_wb.py", line 228, in <module>
+    main()
+    ~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/train_rl_wb.py", line 224, in main
+    runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/runners/on_policy_runner.py", line 108, in learn
+    loss_dict = self.alg.update()
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/algorithms/ppo.py", line 256, in update
+    self.actor(
+    ~~~~~~~~~~^
+        batch.observations,
+        ^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        stochastic_output=True,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/models/mlp_model.py", line 99, in forward
+    latent = self.get_latent(obs, masks, hidden_state)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/models/cnn_model.py", line 114, in get_latent
+    latent_cnn_list = [self.cnns[obs_group](obs[obs_group]) for obs_group in self.obs_groups_2d]
+                       ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/modules/cnn.py", line 160, in forward
+    x = layer(x)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/modules/activation.py", line 616, in forward
+    return F.elu(input, self.alpha, self.inplace)
+           ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/functional.py", line 1819, in elu
+    return handle_torch_function(elu, (input,), input, alpha=alpha, inplace=inplace)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/overrides.py", line 1740, in handle_torch_function
+    result = mode.__torch_function__(public_api, types, args, kwargs)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/utils/_device.py", line 109, in __torch_function__
+    return func(*args, **kwargs)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/nn/functional.py", line 1823, in elu
+    result = torch._C._nn.elu(input, alpha)
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 3.52 GiB. GPU 0 has a total capacity of 23.60 GiB of which 2.98 GiB is free. Including non-PyTorch memory, this process has 20.46 GiB memory in use. Of the allocated memory 13.64 GiB is allocated by PyTorch, and 35.67 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

@@ -1,0 +1,58 @@
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+wandb: WARNING `start_method` is deprecated and will be removed in a future version of wandb. This setting is currently non-functional and safely ignored.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/sc.uni-leipzig.de/fk67rahe/.netrc.
+wandb: Currently logged in as: koe-f (koe-f-no) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 8f2eb5k3
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/wandb/run-20260330_122824-8f2eb5k3
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run ausraeumen_01
+wandb: ⭐️ View project at https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: 🚀 View run at https://wandb.ai/koe-f-no/obstacle-avoidance/runs/8f2eb5k3
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: updating run metadata
+wandb: uploading model_999.pt; uploading output.log; uploading wandb-summary.json
+wandb: uploading model_999.pt; uploading output.log
+wandb: uploading history steps 998-999, summary, console lines 28981-29010
+wandb: 
+wandb: Run history:
+wandb:         Episode/action_mean_ax ▅▆▆▆▅▅▆█▇▇▆█▆▅▆▆▅▆▆▆▆▆▆▆▆▆▇▇▇▆▆▇▇▁▅▇▆▅▁▅
+wandb:         Episode/action_mean_ay ▄▃▃▃▃▃▃▃▄▄▂▂▂▁▂▂▁▂▂▂▂▂▂▂▂▃▄▃▁▁▄██▃▃▃▄▃▃█
+wandb:       Episode/action_mean_ayaw ▅▅▄▅▅▅▅▅▅▅▆▅▅▅▅▅▆▆▂▅▅▅▅▅▅▅▅▅▅▅▅▁▅▅▅▇██▃▅
+wandb:         Episode/action_mean_az ▂▃▅▆▆▇▆▆▅▅▃▂▃▄▅▇▄▄▅▄▅▅▅▅▄▂▂▃▂▁▂▄▃▂▂▆█▆▇▅
+wandb: Episode/action_saturation_rate ▁▃▄▄▄▅▇▆▇█▇██████████████▅▇▆█▇▇██▂▆▆▅▃▇▆
+wandb:          Episode/obs_clip_rate ▁▂▁▂▃▂▃▂▂▃▄▃▃▃▆▅▆▂▆▆▆▆▇▇▇▇▇▇▇▇▇▇▇▅▄▆▆██▅
+wandb:              Episode/rew_crash ▁▁▁▁▂▂▂▂▂▃▇▆▂▄▇█▇█▇████████▇▇▇▆▃▇▅▆▁▃▄▃▆
+wandb:      Episode/rew_distance_flat ▅▄▄▄▄▄▄▄▅▅▅▆▆▇▇▇▇▇▇▄▆▆▆▆█▇████▇█▇█▇▅▃▁▄▄
+wandb: Episode/rew_obstacle_proximity ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:            Episode/rew_success ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                            +11 ...
+wandb: 
+wandb: Run summary:
+wandb:         Episode/action_mean_ax 14.18974
+wandb:         Episode/action_mean_ay 5.88232
+wandb:       Episode/action_mean_ayaw -2.68447
+wandb:         Episode/action_mean_az 8.81604
+wandb: Episode/action_saturation_rate 24.2731
+wandb:          Episode/obs_clip_rate 21.70238
+wandb:              Episode/rew_crash -1.64206
+wandb:      Episode/rew_distance_flat -1.91754
+wandb: Episode/rew_obstacle_proximity 0
+wandb:            Episode/rew_success 0
+wandb:                            +11 ...
+wandb: 
+wandb: 🚀 View run ausraeumen_01 at: https://wandb.ai/koe-f-no/obstacle-avoidance/runs/8f2eb5k3
+wandb: ⭐️ View project at: https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 11 other file(s)
+wandb: Find logs at: ./wandb/run-20260330_122824-8f2eb5k3/logs

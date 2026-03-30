@@ -1,0 +1,2 @@
+/var/spool/slurmd/job20909712/slurm_script: line 23: cd: /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_-h: No such file or directory
+python: can't open file '/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/train_rl.py': [Errno 2] No such file or directory

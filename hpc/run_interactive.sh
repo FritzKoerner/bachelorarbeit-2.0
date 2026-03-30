@@ -3,71 +3,100 @@
 # Request an interactive GPU session on HPC Leipzig
 #
 # Usage:
-#   ./run_interactive.sh                                  # defaults
-#   ./run_interactive.sh -p clara -g v100 -t 10           # partition, gpu, time
-#   ./run_interactive.sh -p paula -g a30 --mem 16G -c 8   # more resources
-#   ./run_interactive.sh -G 2 -N 1 --mem 32G              # 2 GPUs, 32GB RAM
-#
-# Options:
-#   -p, --partition PART   Partition name          (default: clara)
-#   -g, --gpu TYPE         GPU type                (default: rtx2080ti)
-#   -t, --time MINUTES     Time limit in minutes   (default: 10)
-#   -m, --mem SIZE         Memory (e.g. 8G, 16G)   (default: 8G)
-#   -G, --num-gpus N       Number of GPUs           (default: 1)
-#   -c, --cpus N           CPUs per task            (default: 4)
-#   -N, --nodes N          Number of nodes          (default: 1)
+#   ./run_interactive.sh              # fully interactive
 # ==============================================================================
 
 source "$(dirname "$0")/_output.sh"
 
-# Defaults
-PARTITION="clara"
-GPU_TYPE="rtx2080ti"
-MINUTES=10
-MEM="8G"
-NUM_GPUS=1
-CPUS=4
-NODES=1
-
-show_help() {
-    sed -n '2,16p' "$0" | sed 's/^# \?//'
+# --- Prompt helpers (same as submit_training.sh) ---
+# Usage: ask "Label" "default_value"  →  sets REPLY (or default if empty)
+ask() {
+    local label="$1"
+    local default="$2"
+    local input
+    printf "   ${DIM}%-20s${RESET}${CYAN}[${default}]${RESET}: " "$label"
+    read -r input
+    REPLY="${input:-$default}"
 }
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        -p|--partition) PARTITION="$2"; shift 2 ;;
-        -g|--gpu)       GPU_TYPE="$2"; shift 2 ;;
-        -t|--time)      MINUTES="$2"; shift 2 ;;
-        -m|--mem)       MEM="$2"; shift 2 ;;
-        -G|--num-gpus)  NUM_GPUS="$2"; shift 2 ;;
-        -c|--cpus)      CPUS="$2"; shift 2 ;;
-        -N|--nodes)     NODES="$2"; shift 2 ;;
-        -h|--help)      show_help; exit 0 ;;
-        *) echo "Unknown option: $1. Use -h for help."; exit 1 ;;
-    esac
-done
 
 banner "Interactive GPU Session" "$MAGENTA"
 
-section "Configuration"
+# ╔══════════════════════════════════════╗
+# ║  1. Cluster resources                ║
+# ╚══════════════════════════════════════╝
+section "Cluster Resources"
+echo -e "   ${DIM}Partitions: paula (A30), clara (V100), clara-long (V100 10d)${RESET}"
+ask "Partition" "paula"
+PARTITION="$REPLY"
+
+# Set GPU type default based on partition
+case "$PARTITION" in
+    paula)      DEF_GPU="a30" ;;
+    clara*)     DEF_GPU="v100" ;;
+    *)          DEF_GPU="a30" ;;
+esac
+
+ask "GPU type" "$DEF_GPU"
+GPU_TYPE="$REPLY"
+
+ask "GPU count" "1"
+NUM_GPUS="$REPLY"
+
+ask "Memory" "16G"
+MEM="$REPLY"
+
+ask "CPUs" "4"
+CPUS="$REPLY"
+
+ask "Time (minutes)" "20"
+MINUTES="$REPLY"
+
+# ╔══════════════════════════════════════╗
+# ║  2. Summary & confirm                ║
+# ╚══════════════════════════════════════╝
+
+# Format time for display and salloc
+if [ "$MINUTES" -ge 60 ] 2>/dev/null; then
+    HOURS=$(( MINUTES / 60 ))
+    REMAINING=$(( MINUTES % 60 ))
+    TIME_FMT=$(printf "%d:%02d:00" "$HOURS" "$REMAINING")
+    TIME_DISPLAY="${HOURS}h${REMAINING}m"
+else
+    TIME_FMT=$(printf "%02d:00" "$MINUTES")
+    TIME_DISPLAY="${MINUTES}min"
+fi
+
+section "Summary"
 info "Partition" "$PARTITION"
 info "GPU" "${GPU_TYPE} x${NUM_GPUS}"
 info "Memory" "$MEM"
 info "CPUs" "$CPUS"
-info "Nodes" "$NODES"
-info "Time limit" "${MINUTES} min"
+info "Time limit" "$TIME_DISPLAY"
 
+echo ""
+printf "   ${BOLD}Request this allocation?${RESET} ${CYAN}[Y/n]${RESET}: "
+read -r confirm
+case "${confirm:-Y}" in
+    [Nn]*) echo -e "\n   ${DIM}Cancelled.${RESET}\n"; exit 0 ;;
+esac
+
+# ╔══════════════════════════════════════╗
+# ║  3. Allocate                         ║
+# ╚══════════════════════════════════════╝
 section "After allocation" "$SYM_GEAR"
 echo ""
-echo -e "   ${DIM}Run smoke tests on compute node:${RESET}"
+echo -e "   ${DIM}Load environment:${RESET}"
+echo -e "   ${CYAN}source ~/genesis_v04/hpc/setup_env.sh --load${RESET}"
+echo ""
+echo -e "   ${DIM}Run smoke tests:${RESET}"
 echo -e "   ${CYAN}srun --pty ~/genesis_v04/hpc/smoke_test.sh${RESET}"
 echo ""
-echo -e "   ${DIM}Or get an interactive shell:${RESET}"
+echo -e "   ${DIM}Get an interactive shell:${RESET}"
 echo -e "   ${CYAN}srun --pty bash${RESET}"
 echo ""
 
 section "Requesting allocation" "$SYM_ROCKET"
-step "salloc --partition=$PARTITION --gpus=${GPU_TYPE}:${NUM_GPUS} --mem=$MEM --cpus=$CPUS -N $NODES --time=00:${MINUTES}:00"
+step "salloc --partition=$PARTITION --gpus=${GPU_TYPE}:${NUM_GPUS} --mem=$MEM --cpus-per-task=$CPUS --time=$TIME_FMT"
 echo ""
 
 salloc \
@@ -75,5 +104,4 @@ salloc \
     --gpus="${GPU_TYPE}:${NUM_GPUS}" \
     --mem="$MEM" \
     --cpus-per-task="$CPUS" \
-    --time="00:${MINUTES}:00" \
-    -N "$NODES"
+    --time="$TIME_FMT"

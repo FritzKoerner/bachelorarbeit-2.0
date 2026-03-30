@@ -51,23 +51,38 @@ def _can_use_batch_renderer():
         return False
     try:
         major, minor = torch.cuda.get_device_capability()
-        return (major, minor) >= (7, 5)  # Turing+ required (V100/Volta 7.0 lacks buffer_device_address)
+        return (major, minor) >= (
+            7,
+            5,
+        )  # Turing+ required (V100/Volta 7.0 lacks buffer_device_address)
     except Exception:
         return False
 
 
 class ObstacleAvoidanceEnv:
-    def __init__(self, num_envs: int, env_cfg: dict, obs_cfg: dict,
-                 reward_cfg: dict, show_viewer: bool = False):
+    def __init__(
+        self,
+        num_envs: int,
+        env_cfg: dict,
+        obs_cfg: dict,
+        reward_cfg: dict,
+        show_viewer: bool = False,
+    ):
         self.num_envs = num_envs
-        self.num_state_obs = obs_cfg["num_state_obs"]   # 17
-        self.num_obs = self.num_state_obs                # runner reads shapes from TensorDict
+        self.num_state_obs = obs_cfg["num_state_obs"]  # 17
+        self.num_obs = self.num_state_obs  # runner reads shapes from TensorDict
         self.num_privileged_obs = None
-        self.num_actions = env_cfg["num_actions"]        # 4
+        self.num_actions = env_cfg["num_actions"]  # 4
         self.device = gs.device
 
         self.dt = 0.01  # 100 Hz
-        self.max_episode_length = math.ceil(env_cfg["episode_length_s"] / self.dt)
+        self.decimation = env_cfg.get(
+            "decimation", 1
+        )  # RL decision every N physics steps
+        self.decision_dt = self.dt * self.decimation  # effective RL timestep
+        self.max_episode_length = math.ceil(
+            env_cfg["episode_length_s"] / self.decision_dt
+        )
 
         self.env_cfg = env_cfg
         self.obs_cfg = obs_cfg
@@ -192,7 +207,12 @@ class ObstacleAvoidanceEnv:
                 file="../assets/robots/draugas/draugas_genesis.urdf",
                 pos=(0, 0, 3.0),
                 euler=(0, 0, 0),
-                propellers_link_name=["prop0_link", "prop1_link", "prop2_link", "prop3_link"],
+                propellers_link_name=[
+                    "prop0_link",
+                    "prop1_link",
+                    "prop2_link",
+                    "prop3_link",
+                ],
                 propellers_spin=[1, -1, 1, -1],
             )
         )
@@ -209,17 +229,22 @@ class ObstacleAvoidanceEnv:
             # Then tilt 45° downward: compose with R_x(-45°) in camera frame
             # Result: look direction = body [1, 0, -1]/√2 (forward + 45° down)
             c = np.cos(np.radians(45))  # √2/2
-            offset_T[:3, :3] = np.array([
-                [ 0,  c, -c],
-                [-1,  0,  0],
-                [ 0,  c,  c],
-            ], dtype=np.float64)
+            offset_T[:3, :3] = np.array(
+                [
+                    [0, c, -c],
+                    [-1, 0, 0],
+                    [0, c, c],
+                ],
+                dtype=np.float64,
+            )
             offset_T[2, 3] = -0.1  # 0.1m below drone center
             self.depth_camera.attach(base_link, offset_T)
 
         if not self._using_batch_renderer and self.num_envs > 16:
-            print(f"[NOTE] Per-env depth rendering with {self.num_envs} envs "
-                  f"may be slow. Use -B 4 for local dev.")
+            print(
+                f"[NOTE] Per-env depth rendering with {self.num_envs} envs "
+                f"may be slow. Use -B 4 for local dev."
+            )
 
         # Drone base link
         self.drone_base_link = self.drone.get_link("main_body")
@@ -239,15 +264,19 @@ class ObstacleAvoidanceEnv:
             device=gs.device,
         )
 
-        # Reward scaling: per-step rewards *= dt
-        per_step_rewards = {"distance", "time", "obstacle_proximity"}
+        # Reward scaling: per-step rewards *= decision_dt (time-independent magnitude)
+        per_step_rewards = {
+            "time",
+            "obstacle_proximity" "distance",
+            "distance_absolute",
+            "distance_flat",
+        }
         for name in self.reward_scales:
             if name in per_step_rewards:
-                self.reward_scales[name] *= self.dt
+                self.reward_scales[name] *= self.decision_dt
 
         self.reward_functions = {
-            name: getattr(self, "_reward_" + name)
-            for name in self.reward_scales
+            name: getattr(self, "_reward_" + name) for name in self.reward_scales
         }
         self.episode_sums = {
             name: torch.zeros(self.num_envs, device=gs.device, dtype=gs.tc_float)
@@ -260,32 +289,51 @@ class ObstacleAvoidanceEnv:
         )
         self.depth_buf = torch.zeros(
             (self.num_envs, self.depth_stack_size, self.depth_res, self.depth_res),
-            device=gs.device, dtype=gs.tc_float,
+            device=gs.device,
+            dtype=gs.tc_float,
         )
         # Last known forward direction (Rasterizer fallback only — not needed with attach())
         if not self._using_batch_renderer:
-            self._last_forward = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
+            self._last_forward = torch.zeros(
+                (self.num_envs, 3), device=gs.device, dtype=gs.tc_float
+            )
             self._last_forward[:, 0] = 1.0  # default: +X
 
         # Reward / reset buffers
-        self.rew_buf            = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
-        self.reset_buf          = torch.ones((self.num_envs,), device=gs.device, dtype=gs.tc_int)
-        self.episode_length_buf = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_int)
+        self.rew_buf = torch.zeros(
+            (self.num_envs,), device=gs.device, dtype=gs.tc_float
+        )
+        self.reset_buf = torch.ones((self.num_envs,), device=gs.device, dtype=gs.tc_int)
+        self.episode_length_buf = torch.zeros(
+            (self.num_envs,), device=gs.device, dtype=gs.tc_int
+        )
 
         # Action buffers
-        self.actions      = torch.zeros((self.num_envs, self.num_actions), device=gs.device, dtype=gs.tc_float)
+        self.actions = torch.zeros(
+            (self.num_envs, self.num_actions), device=gs.device, dtype=gs.tc_float
+        )
         self.last_actions = torch.zeros_like(self.actions)
 
         # State buffers
-        self.base_pos       = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
-        self.last_base_pos  = torch.zeros_like(self.base_pos)
-        self.base_quat      = torch.zeros((self.num_envs, 4), device=gs.device, dtype=gs.tc_float)
-        self.base_lin_vel   = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
-        self.base_ang_vel   = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
+        self.base_pos = torch.zeros(
+            (self.num_envs, 3), device=gs.device, dtype=gs.tc_float
+        )
+        self.last_base_pos = torch.zeros_like(self.base_pos)
+        self.base_quat = torch.zeros(
+            (self.num_envs, 4), device=gs.device, dtype=gs.tc_float
+        )
+        self.base_lin_vel = torch.zeros(
+            (self.num_envs, 3), device=gs.device, dtype=gs.tc_float
+        )
+        self.base_ang_vel = torch.zeros(
+            (self.num_envs, 3), device=gs.device, dtype=gs.tc_float
+        )
 
         # Target
-        self.target_pos   = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
-        self.rel_pos      = torch.zeros_like(self.base_pos)
+        self.target_pos = torch.zeros(
+            (self.num_envs, 3), device=gs.device, dtype=gs.tc_float
+        )
+        self.rel_pos = torch.zeros_like(self.base_pos)
         self.last_rel_pos = torch.zeros_like(self.base_pos)
 
         # Obstacle positions: (n_envs, n_obstacles, 3) — center of each box
@@ -294,19 +342,40 @@ class ObstacleAvoidanceEnv:
         )
 
         # Obstacle collision / proximity
-        self.obstacle_collision = torch.zeros((self.num_envs,), device=gs.device, dtype=torch.bool)
-        self.min_obstacle_dist  = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
+        self.obstacle_collision = torch.zeros(
+            (self.num_envs,), device=gs.device, dtype=torch.bool
+        )
+        self.min_obstacle_dist = torch.zeros(
+            (self.num_envs,), device=gs.device, dtype=gs.tc_float
+        )
 
         # Hover counter
-        self.hover_counter = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_int)
+        self.hover_counter = torch.zeros(
+            (self.num_envs,), device=gs.device, dtype=gs.tc_int
+        )
+
+        # Unstable buffer: once a drone becomes unstable in an episode,
+        # it stays frozen at frozen_pos (no gravity, no movement) until reset.
+        self.unstable_buf = torch.zeros(
+            (self.num_envs,), device=gs.device, dtype=torch.bool
+        )
+        self.frozen_pos = torch.zeros(
+            (self.num_envs, 3), device=gs.device, dtype=gs.tc_float
+        )
 
         self.global_step = 0
         self.extras = {}
 
         # Debug / monitoring accumulators (logged via extras["episode"])
-        self.action_saturated_count = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
-        self.action_sum    = torch.zeros((self.num_envs, self.num_actions), device=gs.device, dtype=gs.tc_float)
-        self.obs_clipped_count = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
+        self.action_saturated_count = torch.zeros(
+            (self.num_envs,), device=gs.device, dtype=gs.tc_float
+        )
+        self.action_sum = torch.zeros(
+            (self.num_envs, self.num_actions), device=gs.device, dtype=gs.tc_float
+        )
+        self.obs_clipped_count = torch.zeros(
+            (self.num_envs,), device=gs.device, dtype=gs.tc_float
+        )
 
         self._built = True
 
@@ -403,10 +472,14 @@ class ObstacleAvoidanceEnv:
 
     def _set_obstacle(self, idx, pos_xy, oz_val, n, envs_idx):
         """Helper: set obstacle position from XY coordinates."""
-        new_pos = torch.stack([
-            pos_xy[:, 0], pos_xy[:, 1],
-            torch.full((n,), oz_val, device=gs.device),
-        ], dim=-1)
+        new_pos = torch.stack(
+            [
+                pos_xy[:, 0],
+                pos_xy[:, 1],
+                torch.full((n,), oz_val, device=gs.device),
+            ],
+            dim=-1,
+        )
         self.obstacles[idx].set_pos(new_pos, envs_idx=envs_idx, zero_velocity=True)
         self.obstacle_positions[envs_idx, idx] = new_pos
 
@@ -450,9 +523,9 @@ class ObstacleAvoidanceEnv:
 
         for env_i in range(self.num_envs):
             # Forward direction from drone quaternion (body X -> world)
-            fwd = transform_by_quat(
-                forward_body, self.base_quat[env_i : env_i + 1]
-            )[0]  # (3,)
+            fwd = transform_by_quat(forward_body, self.base_quat[env_i : env_i + 1])[
+                0
+            ]  # (3,)
             # Project to XY plane for horizontal look direction
             fwd_xy = fwd.clone()
             fwd_xy[2] = 0.0
@@ -467,23 +540,24 @@ class ObstacleAvoidanceEnv:
             cam_pos = self.base_pos[env_i].clone()
             cam_pos[2] -= 0.1  # slightly below drone centre
             # 45° downward tilt: equal forward + down components
-            cam_lookat = cam_pos + fwd_xy + torch.tensor([0.0, 0.0, -1.0], device=gs.device)
+            cam_lookat = (
+                cam_pos + fwd_xy + torch.tensor([0.0, 0.0, -1.0], device=gs.device)
+            )
 
             # Swap env 0's obstacles to env_i's positions for rendering
             if env_i > 0:
                 for j, obs_entity in enumerate(self.obstacles):
                     obs_entity.set_pos(
                         self.obstacle_positions[env_i, j].unsqueeze(0),
-                        envs_idx=env_0_idx, zero_velocity=True,
+                        envs_idx=env_0_idx,
+                        zero_velocity=True,
                     )
 
             self.depth_camera.set_pose(pos=cam_pos, lookat=cam_lookat)
             _, depth_raw, _, _ = self.depth_camera.render(
                 depth=True, segmentation=False
             )
-            depth = torch.as_tensor(
-                depth_raw, dtype=gs.tc_float, device=gs.device
-            )
+            depth = torch.as_tensor(depth_raw, dtype=gs.tc_float, device=gs.device)
             # Always extract depth[0] — Rasterizer only renders env 0's rigid bodies
             new_depth = torch.clamp(depth[0] / self.max_depth, 0.0, 1.0)
 
@@ -497,7 +571,8 @@ class ObstacleAvoidanceEnv:
             for j, obs_entity in enumerate(self.obstacles):
                 obs_entity.set_pos(
                     self.obstacle_positions[0, j].unsqueeze(0),
-                    envs_idx=env_0_idx, zero_velocity=True,
+                    envs_idx=env_0_idx,
+                    zero_velocity=True,
                 )
 
     # ------------------------------------------------------------------
@@ -509,32 +584,63 @@ class ObstacleAvoidanceEnv:
 
         # Accumulate debug metrics
         self.action_sum += self.actions
-        self.action_saturated_count += (torch.abs(self.actions) > 0.99).any(dim=1).float()
+        self.action_saturated_count += (
+            (torch.abs(self.actions) > 0.99).any(dim=1).float()
+        )
 
         scales = self.env_cfg["action_scales"]
-        target_x   = self.base_pos[:, 0] + self.actions[:, 0] * scales[0]
-        target_y   = self.base_pos[:, 1] + self.actions[:, 1] * scales[1]
-        target_z   = self.base_pos[:, 2] + self.actions[:, 2] * scales[2]
+        target_x = self.base_pos[:, 0] + self.actions[:, 0] * scales[0]
+        target_y = self.base_pos[:, 1] + self.actions[:, 1] * scales[1]
+        target_z = self.base_pos[:, 2] + self.actions[:, 2] * scales[2]
         target_yaw = self.actions[:, 3] * 180.0
         target_pos = torch.stack([target_x, target_y, target_z], dim=-1)
 
-        rpms = self.controller.update(target_pos, target_yaw)
-        self.drone.set_propellels_rpm(rpms)
         if self.target_vis is not None:
             self.target_vis.set_pos(self.target_pos, zero_velocity=True)
-        self.scene.step()
+
+        # Run physics N times per RL decision (decimation).
+        # PID tracks the same target each substep; state is read after the last one.
+        # With high decimation, early random actions can cause extreme states mid-loop.
+        # Kill motors for unstable envs to prevent NaN accelerations in the solver;
+        # the post-loop crash check will reset them normally.
+        for _ in range(self.decimation):
+            rpms = self.controller.update(target_pos, target_yaw)
+            curr_pos = self.drone.get_pos()
+            curr_att = quat_to_xyz(self.drone.get_quat(), rpy=True, degrees=True)
+            newly_unstable = (
+                (curr_pos[:, 2] < 0.2)
+                | (torch.abs(curr_att[:, 0]) > 60.0)
+                | (torch.abs(curr_att[:, 1]) > 60.0)
+                | (torch.norm(self.drone.get_vel(), dim=1) > 20.0)
+            ) & ~self.unstable_buf
+            # Latch: record frozen position for newly unstable drones
+            if newly_unstable.any():
+                self.frozen_pos[newly_unstable] = curr_pos[newly_unstable].clone()
+                self.unstable_buf |= newly_unstable
+            # Freeze all unstable drones (newly + previously) at their frozen position
+            if self.unstable_buf.any():
+                unstable_idx = self.unstable_buf.nonzero(as_tuple=False).reshape(-1)
+                rpms[self.unstable_buf] = 0.0
+                self.drone.set_pos(
+                    self.frozen_pos[unstable_idx],
+                    zero_velocity=True,
+                    envs_idx=unstable_idx,
+                )
+            self.drone.set_propellels_rpm(rpms)
+            self.scene.step()
 
         # Update state
         self.episode_length_buf += 1
         self.last_base_pos[:] = self.base_pos[:]
-        self.base_pos[:]      = self.drone.get_pos()
-        self.rel_pos          = self.target_pos - self.base_pos
-        self.last_rel_pos     = self.target_pos - self.last_base_pos
-        self.base_quat[:]     = self.drone.get_quat()
+        self.base_pos[:] = self.drone.get_pos()
+        self.rel_pos = self.target_pos - self.base_pos
+        self.last_rel_pos = self.target_pos - self.last_base_pos
+        self.base_quat[:] = self.drone.get_quat()
 
         base_euler = quat_to_xyz(
             transform_quat_by_quat(self.inv_base_init_quat, self.base_quat),
-            rpy=True, degrees=True,
+            rpy=True,
+            degrees=True,
         )
         inv_base_quat = inv_quat(self.base_quat)
         self.base_lin_vel[:] = transform_by_quat(self.drone.get_vel(), inv_base_quat)
@@ -542,20 +648,22 @@ class ObstacleAvoidanceEnv:
 
         # AABB obstacle distance check (distance to box surface, 0 when inside)
         # base_pos: (n_envs, 3), obstacle_positions: (n_envs, n_obs, 3)
-        diff = self.base_pos.unsqueeze(1) - self.obstacle_positions  # (n_envs, n_obs, 3)
-        clamped = torch.clamp(
-            torch.abs(diff) - self.obstacle_half_extents, min=0.0
-        )
+        diff = (
+            self.base_pos.unsqueeze(1) - self.obstacle_positions
+        )  # (n_envs, n_obs, 3)
+        clamped = torch.clamp(torch.abs(diff) - self.obstacle_half_extents, min=0.0)
         obs_dists = torch.norm(clamped, dim=-1)  # (n_envs, n_obs)
         self.min_obstacle_dist = obs_dists.min(dim=1).values
         self.obstacle_collision = self.min_obstacle_dist < self.collision_radius
 
         # Hover counter
         close_enough = torch.norm(self.rel_pos, dim=1) < self.env_cfg["hover_radius"]
-        slow_enough  = torch.norm(self.base_lin_vel, dim=1) < self.env_cfg["success_vel_threshold"]
-        near_target  = close_enough & slow_enough
-        self.hover_counter[ near_target] += 1
-        self.hover_counter[~near_target]  = 0
+        slow_enough = (
+            torch.norm(self.base_lin_vel, dim=1) < self.env_cfg["success_vel_threshold"]
+        )
+        near_target = close_enough & slow_enough
+        self.hover_counter[near_target] += 1
+        self.hover_counter[~near_target] = 0
 
         # Termination
         self.crash_condition = (
@@ -568,7 +676,9 @@ class ObstacleAvoidanceEnv:
         self.success_condition = self.hover_counter >= self.env_cfg["hover_steps"]
         timeout_condition = self.episode_length_buf > self.max_episode_length
 
-        self.reset_buf = timeout_condition | self.crash_condition | self.success_condition
+        self.reset_buf = (
+            timeout_condition | self.crash_condition | self.success_condition
+        )
 
         self.extras["time_outs"] = torch.zeros_like(self.reset_buf, dtype=gs.tc_float)
         self.extras["time_outs"][timeout_condition] = 1.0
@@ -592,8 +702,9 @@ class ObstacleAvoidanceEnv:
         self.last_actions[:] = self.actions[:]
 
         # Detect obs clipping (any scaled dim at ±1 boundary)
-        clipped = (self.state_buf[:, :3].abs().gt(0.99).any(dim=1)
-                   | self.state_buf[:, 7:13].abs().gt(0.99).any(dim=1))
+        clipped = self.state_buf[:, :3].abs().gt(0.99).any(dim=1) | self.state_buf[
+            :, 7:13
+        ].abs().gt(0.99).any(dim=1)
         self.obs_clipped_count += clipped.float()
 
         return obs, self.rew_buf, self.reset_buf, self.extras
@@ -604,22 +715,32 @@ class ObstacleAvoidanceEnv:
 
         n = len(envs_idx)
 
-        # Randomize drone spawn
-        offset = self.env_cfg["spawn_offset"]
-        sx = gs_rand_float(-offset, offset, (n,), gs.device)
-        sy = gs_rand_float(-offset, offset, (n,), gs.device)
-        sz = gs_rand_float(
-            self.env_cfg["spawn_height_min"],
-            self.env_cfg["spawn_height_max"],
-            (n,), gs.device,
-        )
-        spawn_pos = torch.stack([sx, sy, sz], dim=-1)
-
-        # Randomize target (always at configured ranges — curriculum only affects obstacles)
+        # Randomize target (always at configured ranges)
         tx = gs_rand_float(*self.env_cfg["target_x_range"], (n,), gs.device)
         ty = gs_rand_float(*self.env_cfg["target_y_range"], (n,), gs.device)
         tz = gs_rand_float(*self.env_cfg["target_z_range"], (n,), gs.device)
         self.target_pos[envs_idx] = torch.stack([tx, ty, tz], dim=-1)
+
+        # Randomize drone spawn
+        spawn_curriculum_steps = self.env_cfg.get("spawn_curriculum_steps", 0)
+        if spawn_curriculum_steps > 0 and self.global_step < spawn_curriculum_steps:
+            # Early curriculum: spawn ~1m above the target so the agent
+            # learns hovering and landing before long-range navigation.
+            spawn_r = self.env_cfg.get("spawn_curriculum_radius", 1.0)
+            sx = tx + gs_rand_float(-spawn_r, spawn_r, (n,), gs.device)
+            sy = ty + gs_rand_float(-spawn_r, spawn_r, (n,), gs.device)
+            sz = tz + gs_rand_float(0.5, spawn_r + 0.5, (n,), gs.device)  # always above
+        else:
+            offset = self.env_cfg["spawn_offset"]
+            sx = gs_rand_float(-offset, offset, (n,), gs.device)
+            sy = gs_rand_float(-offset, offset, (n,), gs.device)
+            sz = gs_rand_float(
+                self.env_cfg["spawn_height_min"],
+                self.env_cfg["spawn_height_max"],
+                (n,),
+                gs.device,
+            )
+        spawn_pos = torch.stack([sx, sy, sz], dim=-1)
 
         # Randomize obstacles (curriculum controls density only)
         curriculum_steps = self.env_cfg.get("curriculum_steps", 0)
@@ -638,29 +759,32 @@ class ObstacleAvoidanceEnv:
             self._place_obstacles_strategic(envs_idx, spawn_pos, n, oz_val)
 
         # Set drone state
-        self.base_pos[envs_idx]      = spawn_pos
+        self.base_pos[envs_idx] = spawn_pos
         self.last_base_pos[envs_idx] = spawn_pos
-        self.base_quat[envs_idx]     = self.base_init_quat.reshape(1, -1)
+        self.base_quat[envs_idx] = self.base_init_quat.reshape(1, -1)
 
         self.drone.set_pos(spawn_pos, zero_velocity=True, envs_idx=envs_idx)
-        self.drone.set_quat(self.base_quat[envs_idx], zero_velocity=True, envs_idx=envs_idx)
+        self.drone.set_quat(
+            self.base_quat[envs_idx], zero_velocity=True, envs_idx=envs_idx
+        )
         self.base_lin_vel[envs_idx] = 0
         self.base_ang_vel[envs_idx] = 0
         self.drone.zero_all_dofs_velocity(envs_idx)
 
-        self.rel_pos      = self.target_pos - self.base_pos
+        self.rel_pos = self.target_pos - self.base_pos
         self.last_rel_pos = self.target_pos - self.last_base_pos
 
         self.controller.reset_idx(envs_idx)
 
-        self.last_actions[envs_idx]       = 0.0
+        self.last_actions[envs_idx] = 0.0
         self.episode_length_buf[envs_idx] = 0
-        self.reset_buf[envs_idx]          = True
-        self.hover_counter[envs_idx]      = 0
+        self.reset_buf[envs_idx] = True
+        self.hover_counter[envs_idx] = 0
+        self.unstable_buf[envs_idx] = False
 
         # Clear depth history for reset envs (new episode, new obstacle layout)
         self.depth_buf[envs_idx] = 0.0
-        if hasattr(self, '_last_forward'):
+        if hasattr(self, "_last_forward"):
             self._last_forward[envs_idx, 0] = 1.0
             self._last_forward[envs_idx, 1] = 0.0
             self._last_forward[envs_idx, 2] = 0.0
@@ -677,9 +801,9 @@ class ObstacleAvoidanceEnv:
         # Debug / monitoring metrics
         ep_len = self.episode_length_buf[envs_idx].float().clamp(min=1)
         mean_ep_len = ep_len.mean()
-        self.extras["episode"]["terminal_dist"] = torch.norm(
-            self.rel_pos[envs_idx], dim=1
-        ).mean().item()
+        self.extras["episode"]["terminal_dist"] = (
+            torch.norm(self.rel_pos[envs_idx], dim=1).mean().item()
+        )
         self.extras["episode"]["action_saturation_rate"] = (
             self.action_saturated_count[envs_idx].mean() / mean_ep_len
         ).item()
@@ -689,7 +813,9 @@ class ObstacleAvoidanceEnv:
         action_names = ["ax", "ay", "az", "ayaw"]
         action_mean = self.action_sum[envs_idx] / mean_ep_len
         for i, name in enumerate(action_names):
-            self.extras["episode"][f"action_mean_{name}"] = action_mean[:, i].mean().item()
+            self.extras["episode"][f"action_mean_{name}"] = (
+                action_mean[:, i].mean().item()
+            )
 
         # Reset accumulators
         self.action_saturated_count[envs_idx] = 0.0
@@ -716,11 +842,11 @@ class ObstacleAvoidanceEnv:
         # State vector (17-dim, identical to CoordinateLandingEnv)
         self.state_buf[:] = torch.cat(
             [
-                torch.clip(self.rel_pos     * s["rel_pos"],    -1, 1),   # 3
-                self.base_quat,                                           # 4
-                torch.clip(self.base_lin_vel * s["lin_vel"],   -1, 1),   # 3
-                torch.clip(self.base_ang_vel * s["ang_vel"],   -1, 1),   # 3
-                self.last_actions,                                        # 4
+                torch.clip(self.rel_pos * s["rel_pos"], -1, 1),  # 3
+                self.base_quat,  # 4
+                torch.clip(self.base_lin_vel * s["lin_vel"], -1, 1),  # 3
+                torch.clip(self.base_ang_vel * s["ang_vel"], -1, 1),  # 3
+                self.last_actions,  # 4
             ],
             dim=-1,
         )  # total: 17
@@ -729,40 +855,50 @@ class ObstacleAvoidanceEnv:
         if self.global_step % self.render_interval == 0:
             self._render_depth()
 
-        return TensorDict({
-            "state": self.state_buf.clone(),
-            "depth": self.depth_buf.clone(),
-        }, batch_size=[self.num_envs])
+        return TensorDict(
+            {
+                "state": self.state_buf.clone(),
+                "depth": self.depth_buf.clone(),
+            },
+            batch_size=[self.num_envs],
+        )
 
     # ------------------------------------------------------------------
     # Reward functions
     # ------------------------------------------------------------------
 
-    def _reward_distance(self):
-        """Penalty proportional to distance from target."""
-        return torch.norm(self.rel_pos, dim=1)
+    # def _reward_distance(self):
+    #     """Delta distance: positive for moving closer, negative for moving away."""
+    #     prev_dist = torch.norm(self.last_rel_pos, dim=1)
+    #     curr_dist = torch.norm(self.rel_pos, dim=1)
+    #     return prev_dist - curr_dist
 
-    def _reward_time(self):
-        return torch.ones(self.num_envs, device=gs.device, dtype=gs.tc_float)
+    # def _reward_distance_absolute(self):
+    #     """Proximity reward: increasingly positive the closer the drone is to the target."""
+    #     # return 1.0 / (1.0 + torch.norm(self.rel_pos, dim=1))
+    #     return -torch.norm(self.rel_pos, dim=1)
+
+    def _reward_distance_flat(self):
+        """Flat bonus/penalty: +1 if drone moved closer to target, -1 if further."""
+        prev_dist = torch.norm(self.last_rel_pos, dim=1)
+        curr_dist = torch.norm(self.rel_pos, dim=1)
+        return torch.sign(prev_dist - curr_dist)
+
+    # def _reward_time(self):
+    #     return torch.ones(self.num_envs, device=gs.device, dtype=gs.tc_float)
 
     def _reward_obstacle_proximity(self):
         """Penalty when within safety_radius of any obstacle.
         Linearly increases as drone gets closer: max(0, 1 - dist/safety_radius)."""
-        proximity = torch.clamp(1.0 - self.min_obstacle_dist / self.safety_radius, min=0.0)
+        proximity = torch.clamp(
+            1.0 - self.min_obstacle_dist / self.safety_radius, min=0.0
+        )
         return proximity
 
     def _reward_crash(self):
-        """Penalty on crash (including obstacle collision)."""
+        """Penalty on any crash (ground, tilt, out-of-bounds, or obstacle collision)."""
         rew = torch.zeros(self.num_envs, device=gs.device, dtype=gs.tc_float)
-        # Crash but NOT obstacle collision — that has its own reward
-        non_obs_crash = self.crash_condition & ~self.obstacle_collision
-        rew[non_obs_crash] = 1.0
-        return rew
-
-    def _reward_obstacle_collision(self):
-        """Penalty on obstacle collision."""
-        rew = torch.zeros(self.num_envs, device=gs.device, dtype=gs.tc_float)
-        rew[self.obstacle_collision] = 1.0
+        rew[self.crash_condition] = 1.0
         return rew
 
     def _reward_success(self):

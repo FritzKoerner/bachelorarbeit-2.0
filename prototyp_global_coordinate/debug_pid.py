@@ -5,9 +5,11 @@ records state over time, and plots tracking performance.
 
 Usage:
     cd prototyp_global_coordinate
-    python train.py                          # default target (3, 3, 3), viewer on
-    python train.py --target 5 5 2           # custom target
-    python train.py --no_viewer --steps 3000 # headless, more steps
+    python debug_pid.py                              # default target (3, 3, 3), viewer on
+    python debug_pid.py --target 5 5 2               # custom target
+    python debug_pid.py --target_yaw 90              # track 90 deg yaw
+    python debug_pid.py --no_viewer --steps 3000     # headless, more steps
+    python debug_pid.py --yaw_test                   # yaw wrapping boundary test
 """
 
 import argparse
@@ -17,6 +19,167 @@ import genesis as gs
 from genesis.utils.geom import quat_to_xyz
 
 from controllers.pid_controller import CascadingPIDController
+
+
+def run_yaw_test(args):
+    """Yaw wrapping boundary test.
+
+    Holds position at (0, 0, 3) and steps through yaw targets that exercise
+    the +-180 deg discontinuity:  0 → 90 → 170 → -170 → 0.
+
+    The 170 → -170 transition is the critical case: the physical shortest
+    path is +20 deg, but without angular wrapping the PID sees -340 deg
+    and commands a full rotation in the wrong direction.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    dt = 0.01
+    n_envs = 1
+    steps_per_target = 800  # 8 seconds per target
+
+    gs.init(backend=gs.gpu, precision="32", logging_level="warning")
+
+    scene = gs.Scene(
+        sim_options=gs.options.SimOptions(dt=dt, substeps=2),
+        viewer_options=gs.options.ViewerOptions(
+            max_FPS=60,
+            camera_pos=(0, -8, 5),
+            camera_lookat=(0, 0, 3),
+            camera_fov=60,
+        ),
+        rigid_options=gs.options.RigidOptions(
+            dt=dt,
+            constraint_solver=gs.constraint_solver.Newton,
+            enable_collision=True,
+            enable_joint_limit=True,
+        ),
+        show_viewer=not args.no_viewer,
+    )
+    scene.add_entity(gs.morphs.Plane())
+    drone = scene.add_entity(
+        gs.morphs.Drone(
+            file="../assets/robots/draugas/draugas_genesis.urdf",
+            pos=(0, 0, 3),
+            euler=(0, 0, 0),
+            propellers_link_name=["prop0_link", "prop1_link", "prop2_link", "prop3_link"],
+            propellers_spin=[1, -1, 1, -1],
+        )
+    )
+    scene.build(n_envs=n_envs, env_spacing=(40.0, 40.0))
+
+    pid_params = {
+        "base_rpm": 1789.2, "max_rpm": 2700.0,
+        "max_tilt": 30.0, "max_vel_xy": 5.0, "max_vel_z": 3.0,
+        "pid_params_pos_x": [1.0, 0.0, 0.7],
+        "pid_params_pos_y": [1.0, 0.0, 0.7],
+        "pid_params_pos_z": [1.5, 0.0, 1.0],
+        "pid_params_vel_x": [16.0, 0.0, 8.0],
+        "pid_params_vel_y": [16.0, 0.0, 8.0],
+        "pid_params_vel_z": [100.0, 2.0, 10.0],
+        "pid_params_roll":  [6.0, 0.0, 3.0],
+        "pid_params_pitch": [6.0, 0.0, 3.0],
+        "pid_params_yaw":   [0.5, 0.0, 0.8],
+    }
+    controller = CascadingPIDController(
+        drone=drone, dt=dt,
+        base_rpm=pid_params["base_rpm"], max_rpm=pid_params["max_rpm"],
+        pid_params=pid_params, n_envs=n_envs, device=gs.device,
+    )
+
+    target_pos = torch.tensor([[0.0, 0.0, 3.0]], device=gs.device, dtype=torch.float32)
+    yaw_targets = [0.0, 90.0, 170.0, -170.0, 0.0]
+
+    history = {"yaw": [], "target_yaw": [], "roll": [], "pitch": [],
+               "pos_z": [], "rpm_0": [], "rpm_1": [], "rpm_2": [], "rpm_3": []}
+
+    print("Yaw wrapping boundary test")
+    print(f"Yaw targets: {yaw_targets}  ({steps_per_target} steps each)")
+    print(f"{'step':>5} | {'target':>7} | {'yaw':>7} | {'err':>7} | {'roll':>7} | {'pitch':>7} | {'z':>6}")
+    print("-" * 65)
+
+    for yi, yaw_deg in enumerate(yaw_targets):
+        target_yaw = torch.tensor([yaw_deg], device=gs.device, dtype=torch.float32)
+        for s in range(steps_per_target):
+            global_step = yi * steps_per_target + s
+            rpms = controller.update(target_pos, target_yaw)
+            drone.set_propellels_rpm(rpms)
+            scene.step()
+
+            euler = quat_to_xyz(drone.get_quat(), rpy=True, degrees=True)[0].cpu()
+            pos_z = drone.get_pos()[0, 2].item()
+            r = rpms[0].cpu()
+
+            history["yaw"].append(euler[2].item())
+            history["target_yaw"].append(yaw_deg)
+            history["roll"].append(euler[0].item())
+            history["pitch"].append(euler[1].item())
+            history["pos_z"].append(pos_z)
+            history["rpm_0"].append(r[0].item())
+            history["rpm_1"].append(r[1].item())
+            history["rpm_2"].append(r[2].item())
+            history["rpm_3"].append(r[3].item())
+
+            if s % 200 == 0:
+                yaw_err = yaw_deg - euler[2].item()
+                # show the wrapped error for comparison
+                wrapped_err = ((yaw_err + 180) % 360) - 180
+                print(f"{global_step:5d} | {yaw_deg:+7.1f} | {euler[2].item():+7.1f} "
+                      f"| {wrapped_err:+7.1f} | {euler[0].item():+7.2f} "
+                      f"| {euler[1].item():+7.2f} | {pos_z:6.2f}")
+
+    # --- Plot ---
+    t = np.arange(len(history["yaw"])) * dt
+    fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
+    fig.suptitle("Yaw Wrapping Boundary Test", fontsize=14, fontweight="bold")
+
+    # Panel 1: yaw tracking
+    ax = axes[0]
+    ax.plot(t, history["yaw"], label="actual yaw", color="#3498db", linewidth=1.2)
+    ax.step(t, history["target_yaw"], label="target yaw", color="#e74c3c",
+            linewidth=1.2, linestyle="--", where="post")
+    ax.axhline(180, color="gray", linestyle=":", alpha=0.4)
+    ax.axhline(-180, color="gray", linestyle=":", alpha=0.4)
+    # Mark the critical transition
+    cross_step = 2 * steps_per_target
+    ax.axvline(cross_step * dt, color="#f39c12", alpha=0.5, linestyle="-.",
+               label="170 → -170 transition")
+    ax.set_ylabel("Yaw (deg)")
+    ax.set_title("Yaw Tracking (critical: 170° → -170° should be +20° shortest path)")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # Panel 2: roll/pitch stability
+    ax = axes[1]
+    ax.plot(t, history["roll"], label="roll", color="#e74c3c", linewidth=0.9)
+    ax.plot(t, history["pitch"], label="pitch", color="#2ecc71", linewidth=0.9)
+    ax.plot(t, history["pos_z"], label="altitude", color="#3498db", linewidth=0.9)
+    ax.axhline(3.0, color="#3498db", linestyle="--", alpha=0.3, label="target z=3m")
+    ax.axvline(cross_step * dt, color="#f39c12", alpha=0.5, linestyle="-.")
+    ax.set_ylabel("deg / m")
+    ax.set_title("Stability during yaw maneuvers (roll, pitch, altitude)")
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # Panel 3: Motor RPMs
+    ax = axes[2]
+    ax.plot(t, history["rpm_0"], label="M0 (BR, CW)", alpha=0.8)
+    ax.plot(t, history["rpm_1"], label="M1 (FR, CCW)", alpha=0.8)
+    ax.plot(t, history["rpm_2"], label="M2 (FL, CW)", alpha=0.8)
+    ax.plot(t, history["rpm_3"], label="M3 (BL, CCW)", alpha=0.8)
+    ax.axhline(1789.2, color="gray", linestyle="--", alpha=0.4, label="base RPM")
+    ax.axvline(cross_step * dt, color="#f39c12", alpha=0.5, linestyle="-.")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("RPM")
+    ax.set_title("Motor RPMs (CW/CCW pairs should split symmetrically for pure yaw)")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    save_path = "pid_yaw_test.png"
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"\nPlot saved -> {save_path}")
 
 
 def main():
@@ -32,7 +195,15 @@ def main():
     parser.add_argument("--no_viewer", action="store_true")
     parser.add_argument("--save", type=str, default="pid_debug.png",
                         help="Output plot filename")
+    parser.add_argument("--yaw_test", action="store_true",
+                        help="Yaw wrapping boundary test: hover at (0,0,3) and "
+                             "step through yaw targets [0, 90, 170, -170, 0] "
+                             "to exercise the +-180 deg discontinuity")
     args = parser.parse_args()
+
+    if args.yaw_test:
+        run_yaw_test(args)
+        return
 
     dt = 0.01  # 100 Hz
     n_envs = 1
@@ -99,7 +270,7 @@ def main():
         "pid_params_vel_z": [100.0, 2.0, 10.0],
         "pid_params_roll":  [6.0, 0.0, 3.0],
         "pid_params_pitch": [6.0, 0.0, 3.0],
-        "pid_params_yaw":   [1.0, 0.0, 0.2],
+        "pid_params_yaw":   [0.5, 0.0, 0.8],
     }
 
     controller = CascadingPIDController(
@@ -166,10 +337,10 @@ def main():
     print(f"\nFinal distance to target: {history['dist'][-1]:.4f} m")
 
     # --- Plotting ---
-    plot_pid_debug(history, args.target, dt, args.save)
+    plot_pid_debug(history, args.target, dt, args.save, target_yaw=args.target_yaw)
 
 
-def plot_pid_debug(history, target, dt, save_path):
+def plot_pid_debug(history, target, dt, save_path, target_yaw=0.0):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -177,7 +348,7 @@ def plot_pid_debug(history, target, dt, save_path):
     t = np.arange(len(history["dist"])) * dt
 
     fig, axes = plt.subplots(3, 2, figsize=(14, 12))
-    fig.suptitle(f"PID Debug — Target ({target[0]}, {target[1]}, {target[2]})",
+    fig.suptitle(f"PID Debug — Target ({target[0]}, {target[1]}, {target[2]}), yaw={target_yaw:.0f}°",
                  fontsize=14, fontweight="bold")
 
     # 1. Position tracking (XYZ)
@@ -217,6 +388,9 @@ def plot_pid_debug(history, target, dt, save_path):
     ax.plot(t, history["pitch"], label="pitch", color="#2ecc71")
     ax.plot(t, history["yaw"],   label="yaw",   color="#3498db")
     ax.axhline(0, color="gray", linestyle="-", alpha=0.3)
+    if target_yaw != 0.0:
+        ax.axhline(target_yaw, color="#3498db", linestyle="--", alpha=0.5,
+                    label=f"target yaw={target_yaw:.0f}°")
     ax.set_ylabel("Angle (deg)")
     ax.set_title("Attitude")
     ax.legend(fontsize=8)

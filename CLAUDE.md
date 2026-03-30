@@ -93,11 +93,12 @@ Key files in `prototyp_global_coordinate/`:
 - **`share_cnn_encoders: True`** goes in `"algorithm"` config, NOT in actor/critic. Critic config should omit `cnn_cfg` entirely — PPO injects `actor.cnns` automatically.
 - **W&B logger needs `.to_dict()` on configs** — `WandbSummaryWriter.store_config()` calls `env_cfg.to_dict()`, which fails on plain dicts. Wrap with a `DictConfig(dict)` subclass that adds `to_dict()`. See `train_rl_wb.py`.
 - **Pickle + DictConfig**: `cfgs.pkl` from W&B runs contains `DictConfig` instances. Any script loading it (e.g. `eval_rl_wb.py`) must `from train_rl_wb import DictConfig` or pickle will fail with `AttributeError`.
+- **`cfgs.pkl` format**: `[env_cfg, obs_cfg, reward_cfg, train_cfg]` — a 4-element list, not a dict.
 
 ## Observation & Action Spaces
 
 - **Observation**: `(n_envs, 17)` — `rel_pos(3) + quat(4) + lin_vel(3) + ang_vel(3) + last_actions(4)`, each clipped and scaled
-  - Observation scales: `rel_pos * 1/15` (train_rl.py) or `1/30` (train_rl_wb.py), `lin_vel * 1/5`, `ang_vel * 1/pi`
+  - Observation scales: `rel_pos * 1/15`, `lin_vel * 0.4`, `ang_vel * 1/pi` (both prototypes, both train scripts)
 - **Actions**: `(n_envs, 4)` float in `[-1, 1]` — `[ax, ay, az, ayaw]`
   - `target_xyz = current_pos + action[:3] * action_scales` (offset from current position)
   - `target_yaw = ayaw * 180.0` (degrees)
@@ -147,7 +148,7 @@ Key files (mirrors `prototyp_global_coordinate/` structure):
 
 **Obstacles**: 8 `gs.morphs.Box(1x1x2m)`, distance-based collision (radius 0.3m), obstacle proximity penalty within safety radius (3.0m). Post-curriculum uses strategic placement with 1 guaranteed path blocker on the spawn->target line; curriculum phase uses sparse random placement.
 
-**Rewards**: distance (-5), time (-0.5), obstacle_proximity (-30), crash (-100), obstacle_collision (-150), success (+200). Per-step rewards scaled by dt.
+**Rewards**: distance (+5, delta: prev_dist − curr_dist), time (-0.5), obstacle_proximity (-6), crash (-100, includes obstacle collision), success (+200). Per-step rewards scaled by dt.
 
 ## Running on HPC (Leipzig cluster)
 

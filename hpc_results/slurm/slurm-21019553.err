@@ -1,0 +1,4 @@
+dev.dt.allocateMemory(dev.hdl, &alloc, nullptr, &memory): ERROR_OUT_OF_DEVICE_MEMORY
+Error at /project/src/render/vk/memory.cpp:664 in optional<LocalBuffer> madrona::render::vk::MemoryAllocator::makeLocalBuffer(VkDeviceSize, VkBufferUsageFlags, bool)
+dev.dt.allocateMemory(dev.hdl, &alloc, nullptr, &memory)
+/var/spool/slurmd/job21019553/slurm_script: line 28: 2037406 Aborted                 (core dumped) python train_rl_wb.py -e distance_rel_target_noDTscaling -B 256 --max_iterations 15000

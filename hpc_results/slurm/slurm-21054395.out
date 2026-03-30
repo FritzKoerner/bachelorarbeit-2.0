@@ -1,0 +1,370 @@
+=== Starting training: Sun Mar 29 03:12:49 AM CEST 2026 ===
+Host: paula12.sc.uni-leipzig.de, GPU: NVIDIA A30
+Experiment: wer_wird_millionär, Seed: 0
+[ObstacleAvoidanceEnv] Renderer: BatchRenderer (cfg='auto')
+[38;5;226m[Genesis] [03:13:03] [WARNING] Falling back to legacy URDF parser. Default values of physics properties may be off:
+Error: unknown or unsupported mesh file: '/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/assets/robots/draugas/meshes/main_body.dae' - Element name 'main_body', id 0[0m
+[38;5;226m[Genesis] [03:13:03] [WARNING] Some free joint has non-zero frictionloss, damping or armature parameters. Beware it is non-physical.[0m
+[38;5;226m[Genesis] [03:13:08] [WARNING] Link 'prop0_link' has dubious mass 0.000 compared to the estimate from geometry 0.006 given material density 200.[0m
+[38;5;226m[Genesis] [03:13:08] [WARNING] Ignoring inertia matrix of link 'prop0_link' because center of mass is not specified.[0m
+[38;5;226m[Genesis] [03:13:08] [WARNING] Link 'prop1_link' has dubious mass 0.000 compared to the estimate from geometry 0.006 given material density 200.[0m
+[38;5;226m[Genesis] [03:13:08] [WARNING] Ignoring inertia matrix of link 'prop1_link' because center of mass is not specified.[0m
+[38;5;226m[Genesis] [03:13:08] [WARNING] Link 'prop2_link' has dubious mass 0.000 compared to the estimate from geometry 0.006 given material density 200.[0m
+[38;5;226m[Genesis] [03:13:08] [WARNING] Ignoring inertia matrix of link 'prop2_link' because center of mass is not specified.[0m
+[38;5;226m[Genesis] [03:13:08] [WARNING] Link 'prop3_link' has dubious mass 0.000 compared to the estimate from geometry 0.006 given material density 200.[0m
+[38;5;226m[Genesis] [03:13:08] [WARNING] Ignoring inertia matrix of link 'prop3_link' because center of mass is not specified.[0m
+--------------------------------------------------------------------------------
+Resolved observation sets: 
+	 actor :  ['state', 'depth']
+	 critic :  ['state', 'depth']
+--------------------------------------------------------------------------------
+Actor Model: CNNModel(
+  (obs_normalizer): EmpiricalNormalization()
+  (distribution): GaussianDistribution()
+  (mlp): MLP(
+    (0): Linear(in_features=145, out_features=256, bias=True)
+    (1): ELU(alpha=1.0)
+    (2): Linear(in_features=256, out_features=256, bias=True)
+    (3): ELU(alpha=1.0)
+    (4): Linear(in_features=256, out_features=4, bias=True)
+  )
+  (cnns): ModuleDict(
+    (depth): CNN(
+      (0): Conv2d(1, 32, kernel_size=(8, 8), stride=(4, 4))
+      (1): ELU(alpha=1.0)
+      (2): Conv2d(32, 64, kernel_size=(4, 4), stride=(2, 2))
+      (3): ELU(alpha=1.0)
+      (4): Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1))
+      (5): ELU(alpha=1.0)
+      (6): AdaptiveAvgPool2d(output_size=(1, 1))
+      (7): Flatten(start_dim=1, end_dim=-1)
+    )
+  )
+)
+Sharing CNN encoders between models, the CNN configurations of the receiving model are ignored.
+Critic Model: CNNModel(
+  (obs_normalizer): EmpiricalNormalization()
+  (mlp): MLP(
+    (0): Linear(in_features=145, out_features=256, bias=True)
+    (1): ELU(alpha=1.0)
+    (2): Linear(in_features=256, out_features=256, bias=True)
+    (3): ELU(alpha=1.0)
+    (4): Linear(in_features=256, out_features=1, bias=True)
+  )
+  (cnns): ModuleDict(
+    (depth): CNN(
+      (0): Conv2d(1, 32, kernel_size=(8, 8), stride=(4, 4))
+      (1): ELU(alpha=1.0)
+      (2): Conv2d(32, 64, kernel_size=(4, 4), stride=(2, 2))
+      (3): ELU(alpha=1.0)
+      (4): Conv2d(64, 128, kernel_size=(3, 3), stride=(1, 1))
+      (5): ELU(alpha=1.0)
+      (6): AdaptiveAvgPool2d(output_size=(1, 1))
+      (7): Flatten(start_dim=1, end_dim=-1)
+    )
+  )
+)
+Could not find git repository in /home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/__init__.py. Skipping.
+################################################################################
+[1m                            Learning iteration 0/500                            [0m 
+
+                            Total steps: 1280 
+                       Steps per second: 368 
+                        Collection time: 3.133s 
+                          Learning time: 0.343s 
+                        Mean value loss: 16756.9016
+                    Mean surrogate loss: -0.0222
+                      Mean entropy loss: 5.6747
+                            Mean reward: -161.16
+                    Mean episode length: 3.97
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -2.2295
+                  Mean episode rew_time: -0.0467
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -1.1019
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.2514
+    Mean episode action_saturation_rate: 2.1821
+             Mean episode obs_clip_rate: 1.0672
+            Mean episode action_mean_ax: 0.2178
+            Mean episode action_mean_ay: 0.2129
+            Mean episode action_mean_az: -0.6685
+          Mean episode action_mean_ayaw: -0.0074
+--------------------------------------------------------------------------------
+                         Iteration time: 3.48s
+                           Time elapsed: 00:00:03
+                                    ETA: 00:28:54
+
+################################################################################
+[1m                            Learning iteration 1/500                            [0m 
+
+                            Total steps: 2560 
+                       Steps per second: 491 
+                        Collection time: 2.449s 
+                          Learning time: 0.155s 
+                        Mean value loss: 124903.2680
+                    Mean surrogate loss: -0.0057
+                      Mean entropy loss: 5.6729
+                            Mean reward: -571.57
+                    Mean episode length: 7.37
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -17.0769
+                  Mean episode rew_time: -0.1236
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -2.3300
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.2880
+    Mean episode action_saturation_rate: 5.8399
+             Mean episode obs_clip_rate: 4.7539
+            Mean episode action_mean_ax: 0.4515
+            Mean episode action_mean_ay: -0.2468
+            Mean episode action_mean_az: -0.0203
+          Mean episode action_mean_ayaw: -0.0262
+--------------------------------------------------------------------------------
+                         Iteration time: 2.60s
+                           Time elapsed: 00:00:06
+                                    ETA: 00:25:13
+
+################################################################################
+[1m                            Learning iteration 2/500                            [0m 
+
+                            Total steps: 3840 
+                       Steps per second: 494 
+                        Collection time: 2.433s 
+                          Learning time: 0.157s 
+                        Mean value loss: 249991.2117
+                    Mean surrogate loss: -0.0119
+                      Mean entropy loss: 5.6652
+                            Mean reward: -1007.36
+                    Mean episode length: 9.59
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -31.0451
+                  Mean episode rew_time: -0.1598
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -2.7869
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.2741
+    Mean episode action_saturation_rate: 7.4809
+             Mean episode obs_clip_rate: 6.5493
+            Mean episode action_mean_ax: 0.0410
+            Mean episode action_mean_ay: 0.1351
+            Mean episode action_mean_az: -0.0901
+          Mean episode action_mean_ayaw: 0.0077
+--------------------------------------------------------------------------------
+                         Iteration time: 2.59s
+                           Time elapsed: 00:00:08
+                                    ETA: 00:23:56
+
+################################################################################
+[1m                            Learning iteration 3/500                            [0m 
+
+                            Total steps: 5120 
+                       Steps per second: 474 
+                        Collection time: 2.539s 
+                          Learning time: 0.158s 
+                        Mean value loss: 287330.7344
+                    Mean surrogate loss: -0.0061
+                      Mean entropy loss: 5.6634
+                            Mean reward: -1534.76
+                    Mean episode length: 11.79
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -47.6400
+                  Mean episode rew_time: -0.1961
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -2.9226
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.3121
+    Mean episode action_saturation_rate: 9.2863
+             Mean episode obs_clip_rate: 8.7994
+            Mean episode action_mean_ax: 0.2558
+            Mean episode action_mean_ay: 0.0398
+            Mean episode action_mean_az: 0.1746
+          Mean episode action_mean_ayaw: -0.3166
+--------------------------------------------------------------------------------
+                         Iteration time: 2.70s
+                           Time elapsed: 00:00:11
+                                    ETA: 00:23:29
+
+################################################################################
+[1m                            Learning iteration 4/500                            [0m 
+
+                            Total steps: 6400 
+                       Steps per second: 471 
+                        Collection time: 2.556s 
+                          Learning time: 0.157s 
+                        Mean value loss: 244566.7156
+                    Mean surrogate loss: 0.0077
+                      Mean entropy loss: 5.6683
+                            Mean reward: -1601.67
+                    Mean episode length: 12.38
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -49.2075
+                  Mean episode rew_time: -0.2035
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -3.1681
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.3231
+    Mean episode action_saturation_rate: 9.7241
+             Mean episode obs_clip_rate: 8.9122
+            Mean episode action_mean_ax: 0.2960
+            Mean episode action_mean_ay: 0.0848
+            Mean episode action_mean_az: 0.0686
+          Mean episode action_mean_ayaw: -0.1885
+--------------------------------------------------------------------------------
+                         Iteration time: 2.71s
+                           Time elapsed: 00:00:14
+                                    ETA: 00:23:13
+
+################################################################################
+[1m                            Learning iteration 5/500                            [0m 
+
+                            Total steps: 7680 
+                       Steps per second: 482 
+                        Collection time: 2.497s 
+                          Learning time: 0.157s 
+                        Mean value loss: 199201.4953
+                    Mean surrogate loss: 0.0050
+                      Mean entropy loss: 5.6735
+                            Mean reward: -1189.54
+                    Mean episode length: 10.38
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -37.0792
+                  Mean episode rew_time: -0.1724
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -3.2873
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.2307
+    Mean episode action_saturation_rate: 8.1898
+             Mean episode obs_clip_rate: 7.2688
+            Mean episode action_mean_ax: 0.3157
+            Mean episode action_mean_ay: -0.0710
+            Mean episode action_mean_az: -0.5743
+          Mean episode action_mean_ayaw: 0.0194
+--------------------------------------------------------------------------------
+                         Iteration time: 2.65s
+                           Time elapsed: 00:00:16
+                                    ETA: 00:22:57
+
+################################################################################
+[1m                            Learning iteration 6/500                            [0m 
+
+                            Total steps: 8960 
+                       Steps per second: 490 
+                        Collection time: 2.453s 
+                          Learning time: 0.156s 
+                        Mean value loss: 212419.5203
+                    Mean surrogate loss: 0.0174
+                      Mean entropy loss: 5.6752
+                            Mean reward: -1061.77
+                    Mean episode length: 9.94
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -30.2478
+                  Mean episode rew_time: -0.1645
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -3.3333
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.2600
+    Mean episode action_saturation_rate: 7.9170
+             Mean episode obs_clip_rate: 6.4420
+            Mean episode action_mean_ax: -0.0551
+            Mean episode action_mean_ay: 0.1500
+            Mean episode action_mean_az: -0.5867
+          Mean episode action_mean_ayaw: -0.2853
+--------------------------------------------------------------------------------
+                         Iteration time: 2.61s
+                           Time elapsed: 00:00:19
+                                    ETA: 00:22:42
+
+################################################################################
+[1m                            Learning iteration 7/500                            [0m 
+
+                            Total steps: 10240 
+                       Steps per second: 477 
+                        Collection time: 2.525s 
+                          Learning time: 0.156s 
+                        Mean value loss: 248542.8328
+                    Mean surrogate loss: -0.0114
+                      Mean entropy loss: 5.6763
+                            Mean reward: -1438.51
+                    Mean episode length: 10.88
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -44.1648
+                  Mean episode rew_time: -0.1808
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -3.3333
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.3057
+    Mean episode action_saturation_rate: 8.7426
+             Mean episode obs_clip_rate: 7.8210
+            Mean episode action_mean_ax: 0.2912
+            Mean episode action_mean_ay: 0.8551
+            Mean episode action_mean_az: 0.0956
+          Mean episode action_mean_ayaw: -0.5256
+--------------------------------------------------------------------------------
+                         Iteration time: 2.68s
+                           Time elapsed: 00:00:22
+                                    ETA: 00:22:34
+
+################################################################################
+[1m                            Learning iteration 8/500                            [0m 
+
+                            Total steps: 11520 
+                       Steps per second: 478 
+                        Collection time: 2.521s 
+                          Learning time: 0.157s 
+                        Mean value loss: 288793.8703
+                    Mean surrogate loss: 0.0072
+                      Mean entropy loss: 5.6805
+                            Mean reward: -1612.64
+                    Mean episode length: 12.05
+                        Mean action std: 1.00
+     Mean episode rew_distance_absolute: -50.9378
+                  Mean episode rew_time: -0.2034
+    Mean episode rew_obstacle_proximity: 0.0000
+                 Mean episode rew_crash: -3.3000
+               Mean episode rew_success: 0.0000
+             Mean episode terminal_dist: 1.2687
+    Mean episode action_saturation_rate: 9.8194
+             Mean episode obs_clip_rate: 8.8959
+            Mean episode action_mean_ax: 0.9431
+            Mean episode action_mean_ay: 1.0611
+            Mean episode action_mean_az: 0.6050
+          Mean episode action_mean_ayaw: -0.4149
+--------------------------------------------------------------------------------
+                         Iteration time: 2.68s
+                           Time elapsed: 00:00:24
+                                    ETA: 00:22:27
+
+Traceback (most recent call last):
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/train_rl_wb.py", line 232, in <module>
+    main()
+    ~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/train_rl_wb.py", line 228, in main
+    runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/runners/on_policy_runner.py", line 87, in learn
+    obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
+                                  ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/envs/obstacle_avoidance_env.py", line 618, in step
+    self.scene.step()
+    ~~~~~~~~~~~~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/utils/misc.py", line 148, in wrapper
+    return method(self, *args, **kwargs)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/engine/scene.py", line 1019, in step
+    self._sim.step()
+    ~~~~~~~~~~~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/engine/simulator.py", line 278, in step
+    self.rigid_solver.check_errno()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/engine/solvers/rigid/rigid_solver.py", line 979, in check_errno
+    gs.raise_exception("Invalid accelerations causing 'nan'. Please decrease Rigid simulation timestep.")
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/utils/misc.py", line 41, in raise_exception
+    raise gs.GenesisException(msg)
+genesis.GenesisException: Invalid accelerations causing 'nan'. Please decrease Rigid simulation timestep.
+
+[38;5;9m[Genesis] [03:14:19] [ERROR] GenesisException: Invalid accelerations causing 'nan'. Please decrease Rigid simulation timestep.[0m
+[1;34mwandb[0m: 
+[1;34mwandb[0m: 🚀 View run [33mwer_wird_millionär[0m at: [34mhttps://wandb.ai/koe-f-no/obstacle-avoidance/runs/38k9vsdi[0m
+[1;34mwandb[0m: Find logs at: [1;35mwandb/run-20260329_031351-38k9vsdi/logs[0m
+=== Training complete: Sun Mar 29 03:14:23 AM CEST 2026 ===

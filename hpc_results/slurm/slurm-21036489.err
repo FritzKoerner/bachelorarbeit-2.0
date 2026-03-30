@@ -1,0 +1,53 @@
+W0326 13:20:45.465000 1094774 torch/distributed/run.py:852] 
+W0326 13:20:45.465000 1094774 torch/distributed/run.py:852] *****************************************
+W0326 13:20:45.465000 1094774 torch/distributed/run.py:852] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0326 13:20:45.465000 1094774 torch/distributed/run.py:852] *****************************************
+[W326 13:20:45.962632533 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [localhost]:41345 (errno: 97 - Address family not supported by protocol).
+[W326 13:20:45.964190587 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [localhost]:41345 (errno: 97 - Address family not supported by protocol).
+[W326 13:20:45.966502121 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [localhost]:41345 (errno: 97 - Address family not supported by protocol).
+[W326 13:20:45.164658722 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [paula12.sc.uni-leipzig.de]:37103 (errno: 97 - Address family not supported by protocol).
+[W326 13:21:43.185235227 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [paula12.sc.uni-leipzig.de]:37103 (errno: 97 - Address family not supported by protocol).
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+[W326 13:21:44.593857939 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [paula12.sc.uni-leipzig.de]:37103 (errno: 97 - Address family not supported by protocol).
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+wandb: WARNING `start_method` is deprecated and will be removed in a future version of wandb. This setting is currently non-functional and safely ignored.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/sc.uni-leipzig.de/fk67rahe/.netrc.
+wandb: Currently logged in as: koe-f (koe-f-no) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 7v1umdq9
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/wandb/run-20260326_132145-7v1umdq9
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run adj_stepsPerEnv_multigpu
+wandb: ⭐️ View project at https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: 🚀 View run at https://wandb.ai/koe-f-no/obstacle-avoidance/runs/7v1umdq9
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+[2026-03-27T01:21:02.005] error: *** JOB 21036489 ON paula12 CANCELLED AT 2026-03-27T01:21:02 DUE TO TIME LIMIT ***

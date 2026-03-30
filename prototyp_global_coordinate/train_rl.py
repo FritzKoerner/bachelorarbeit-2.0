@@ -14,7 +14,7 @@ from envs.coordinate_landing_env import CoordinateLandingEnv
 def get_train_cfg(exp_name, max_iterations):
     return {
         # Runner-level
-        "num_steps_per_env": 100,
+        "num_steps_per_env": 34,
         "save_interval": 100,
 
         # Algorithm
@@ -65,6 +65,7 @@ def get_train_cfg(exp_name, max_iterations):
 def get_cfgs():
     env_cfg = {
         "num_actions": 4,
+        "decimation": 300,            # PID runs at 100 Hz, RL decides every 3 s
         "episode_length_s": 30.0,
         # Action scaling: maps [-1,1] → offset from current drone position (metres).
         "action_scales": [3.0, 3.0, 3.0],
@@ -78,12 +79,12 @@ def get_cfgs():
         "target_z_range": [1.0, 1.0],
         # Curriculum: first curriculum_steps env steps → target within
         # curriculum_radius of drone spawn.  curriculum_steps = N_iters × num_steps_per_env
-        "curriculum_steps": 20000,   # 200 iterations × 100
+        "curriculum_steps": 6800,    # 200 iterations × 34
         "curriculum_radius": 1.0,    # metres
         # Success: hover within radius at low velocity for N consecutive steps
         "hover_radius": 0.3,             # metres
         "success_vel_threshold": 0.3,    # m/s  (body frame)
-        "hover_steps": 30,               # 0.3 s at 100 Hz
+        "hover_steps": 1,                # 3 s at 1/3 Hz
         # Visualisation
         "visualize_target": False,
         "env_spacing": 40.0,
@@ -107,7 +108,7 @@ def get_cfgs():
             # Attitude loop → mixer corrections
             "pid_params_roll":  [6.0, 0.0, 3.0],
             "pid_params_pitch": [6.0, 0.0, 3.0],
-            "pid_params_yaw":   [1.0, 0.0, 0.2],
+            "pid_params_yaw":   [0.5, 0.0, 0.8],
         },
     }
 

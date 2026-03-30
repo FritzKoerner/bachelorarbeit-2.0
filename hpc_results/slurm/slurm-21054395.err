@@ -1,0 +1,40 @@
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+wandb: WARNING `start_method` is deprecated and will be removed in a future version of wandb. This setting is currently non-functional and safely ignored.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/sc.uni-leipzig.de/fk67rahe/.netrc.
+wandb: Currently logged in as: koe-f (koe-f-no) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 38k9vsdi
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/wandb/run-20260329_031351-38k9vsdi
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run wer_wird_millionär
+wandb: ⭐️ View project at https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: 🚀 View run at https://wandb.ai/koe-f-no/obstacle-avoidance/runs/38k9vsdi
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+Traceback (most recent call last):
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/train_rl_wb.py", line 232, in <module>
+    main()
+    ~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/train_rl_wb.py", line 228, in main
+    runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/runners/on_policy_runner.py", line 87, in learn
+    obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
+                                  ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/envs/obstacle_avoidance_env.py", line 618, in step
+    self.scene.step()
+    ~~~~~~~~~~~~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/utils/misc.py", line 148, in wrapper
+    return method(self, *args, **kwargs)
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/engine/scene.py", line 1019, in step
+    self._sim.step()
+    ~~~~~~~~~~~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/engine/simulator.py", line 278, in step
+    self.rigid_solver.check_errno()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/engine/solvers/rigid/rigid_solver.py", line 979, in check_errno
+    gs.raise_exception("Invalid accelerations causing 'nan'. Please decrease Rigid simulation timestep.")
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/genesis/utils/misc.py", line 41, in raise_exception
+    raise gs.GenesisException(msg)
+genesis.GenesisException: Invalid accelerations causing 'nan'. Please decrease Rigid simulation timestep.

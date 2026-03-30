@@ -21,7 +21,7 @@ def get_train_cfg(exp_name, max_iterations):
         "algorithm": {
             "class_name": "PPO",
             "clip_param": 0.2,
-            "desired_kl": 0.01,
+            "desired_kl": None,
             "entropy_coef": 0.001,
             "gamma": 0.99,
             "lam": 0.95,
@@ -29,7 +29,7 @@ def get_train_cfg(exp_name, max_iterations):
             "max_grad_norm": 1.0,
             "num_learning_epochs": 5,
             "num_mini_batches": 4,
-            "schedule": "adaptive",
+            "schedule": "fixed",
             "use_clipped_value_loss": True,
             "value_loss_coef": 1.0,
             "share_cnn_encoders": True,
@@ -131,7 +131,7 @@ def get_cfgs():
             "pid_params_vel_z": [100.0, 2.0, 10.0],
             "pid_params_roll":  [6.0, 0.0, 3.0],
             "pid_params_pitch": [6.0, 0.0, 3.0],
-            "pid_params_yaw":   [1.0, 0.0, 0.2],
+            "pid_params_yaw":   [0.5, 0.0, 0.8],
         },
     }
 

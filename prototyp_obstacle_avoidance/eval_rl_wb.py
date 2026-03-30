@@ -4,6 +4,7 @@ import glob
 import os
 import pickle
 import re
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -33,6 +34,40 @@ def find_latest_checkpoint(log_dir: str) -> tuple[str, int]:
         return int(m.group(1)) if m else -1
     best = max(files, key=iter_num)
     return best, iter_num(best)
+
+
+def resolve_hpc_log_dir(run_name):
+    """Resolve --hpc run name to log_dir path, or list available runs and exit."""
+    proto_dir = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+    hpc_base = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "hpc_results", proto_dir
+    ))
+    if run_name == "list":
+        if not os.path.isdir(hpc_base):
+            print(f"No HPC results directory: {hpc_base}")
+            sys.exit(1)
+        runs = sorted(d for d in os.listdir(hpc_base)
+                      if os.path.isdir(os.path.join(hpc_base, d)))
+        if not runs:
+            print(f"No runs in {hpc_base}")
+            sys.exit(1)
+        print(f"\nAvailable HPC runs ({hpc_base}):")
+        for r in runs:
+            ckpts = glob.glob(os.path.join(hpc_base, r, "model_*.pt"))
+            iters = sorted(int(re.search(r"model_(\d+)", c).group(1))
+                           for c in ckpts if re.search(r"model_(\d+)", c))
+            print(f"  {r:30s}  checkpoints: {iters}")
+        sys.exit(0)
+    run_dir = os.path.join(hpc_base, run_name)
+    if not os.path.isdir(run_dir):
+        print(f"HPC run not found: {run_dir}")
+        if os.path.isdir(hpc_base):
+            runs = [d for d in os.listdir(hpc_base)
+                    if os.path.isdir(os.path.join(hpc_base, d))]
+            if runs:
+                print(f"Available: {', '.join(sorted(runs))}")
+        sys.exit(1)
+    return run_dir
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +287,8 @@ def log_to_wandb(results: list[dict], stats: dict, fig: plt.Figure, ckpt_iter: i
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name",   type=str, default="obstacle-avoidance")
+    parser.add_argument("--hpc",              nargs="?", const="list", default=None,
+                        help="HPC run name (e.g. 'my_run'). No value = list runs.")
     parser.add_argument("--log_dir",          type=str, default=None,
                         help="Direct path to log dir (overrides --exp_name)")
     parser.add_argument("--ckpt",             type=int, default=None,
@@ -259,11 +296,18 @@ def main():
     parser.add_argument("--num_envs",         type=int, default=50)
     parser.add_argument("--num_episodes",     type=int, default=100)
     parser.add_argument("--wandb_project",    type=str, default="obstacle-avoidance")
+    parser.add_argument("--vis", action="store_true",
+                        help="Run single visual episode with viewer (no stats/W&B)")
     args = parser.parse_args()
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
 
-    log_dir = args.log_dir if args.log_dir else f"logs/{args.exp_name}"
+    if args.hpc is not None:
+        log_dir = resolve_hpc_log_dir(args.hpc)
+    elif args.log_dir:
+        log_dir = args.log_dir
+    else:
+        log_dir = f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, train_cfg = pickle.load(
         open(f"{log_dir}/cfgs.pkl", "rb")
     )
@@ -278,15 +322,23 @@ def main():
 
     # Eval-time overrides
     reward_cfg["reward_scales"] = {}
-    env_cfg["curriculum_steps"] = 0
-    env_cfg["visualize_target"] = False
+    env_cfg["curriculum_steps"] = float("inf")  # TODO: revert — temporarily disable obstacles
+
+    if args.vis:
+        env_cfg["visualize_target"] = True
+        num_envs    = 1
+        show_viewer = True
+    else:
+        env_cfg["visualize_target"] = False
+        num_envs    = args.num_envs
+        show_viewer = False
 
     env = ObstacleAvoidanceEnv(
-        num_envs=args.num_envs,
+        num_envs=num_envs,
         env_cfg=env_cfg,
         obs_cfg=obs_cfg,
         reward_cfg=reward_cfg,
-        show_viewer=False,
+        show_viewer=show_viewer,
     )
     env.build()
 
@@ -294,38 +346,47 @@ def main():
     runner.load(resume_path)
     policy = runner.get_inference_policy(device=gs.device)
 
-    # Collect episodes
-    print(f"Collecting {args.num_episodes} episodes across {args.num_envs} parallel envs ...")
-    results = collect_episodes(env, policy, args.num_episodes)
+    if args.vis:
+        # Visual mode: single episode with viewer, no stats/W&B
+        obs = env.reset()
+        max_steps = env.max_episode_length
+        with torch.no_grad():
+            for _ in range(max_steps):
+                actions = policy(obs)
+                obs, _, _, _ = env.step(actions)
+    else:
+        # Collect episodes
+        print(f"Collecting {args.num_episodes} episodes across {num_envs} parallel envs ...")
+        results = collect_episodes(env, policy, args.num_episodes)
 
-    # Stats + plots
-    stats = print_stats(results)
-    fig = make_plots(results)
+        # Stats + plots
+        stats = print_stats(results)
+        fig = make_plots(results)
 
-    # Save plot locally
-    plot_path = os.path.join(log_dir, "eval_stats.png")
-    fig.savefig(plot_path, dpi=150, bbox_inches="tight")
-    print(f"Plot saved -> {plot_path}")
+        # Save plot locally
+        plot_path = os.path.join(log_dir, "eval_stats.png")
+        fig.savefig(plot_path, dpi=150, bbox_inches="tight")
+        print(f"Plot saved -> {plot_path}")
 
-    # Log to W&B
-    run_name = f"{args.exp_name}-eval-iter{ckpt_iter}"
-    wandb.init(
-        project=args.wandb_project,
-        name=run_name,
-        job_type="eval",
-        config={
-            "exp_name": args.exp_name,
-            "checkpoint": ckpt_iter,
-            "num_episodes": args.num_episodes,
-            "env_cfg": dict(env_cfg),
-            "obs_cfg": obs_cfg,
-        },
-    )
-    log_to_wandb(results, stats, fig, ckpt_iter)
-    wandb.finish()
-    print(f"W&B eval run logged: {run_name}")
+        # Log to W&B
+        run_name = f"{args.exp_name}-eval-iter{ckpt_iter}"
+        wandb.init(
+            project=args.wandb_project,
+            name=run_name,
+            job_type="eval",
+            config={
+                "exp_name": args.exp_name,
+                "checkpoint": ckpt_iter,
+                "num_episodes": args.num_episodes,
+                "env_cfg": dict(env_cfg),
+                "obs_cfg": obs_cfg,
+            },
+        )
+        log_to_wandb(results, stats, fig, ckpt_iter)
+        wandb.finish()
+        print(f"W&B eval run logged: {run_name}")
 
-    plt.close(fig)
+        plt.close(fig)
 
 
 if __name__ == "__main__":
@@ -335,8 +396,14 @@ if __name__ == "__main__":
 # Evaluate latest checkpoint, log to W&B
 python eval_rl_wb.py
 
-# Evaluate HPC results
-python eval_rl_wb.py --log_dir ../hpc_results/prototyp_obstacle_avoidance/my_run
+# List available HPC runs
+python eval_rl_wb.py --hpc
+
+# Evaluate HPC run (latest checkpoint)
+python eval_rl_wb.py --hpc my_run
+
+# Evaluate HPC run (specific checkpoint)
+python eval_rl_wb.py --hpc my_run --ckpt 400
 
 # Evaluate specific checkpoint
 python eval_rl_wb.py --ckpt 300

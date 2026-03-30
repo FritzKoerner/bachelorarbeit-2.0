@@ -1,0 +1,53 @@
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+wandb: WARNING `start_method` is deprecated and will be removed in a future version of wandb. This setting is currently non-functional and safely ignored.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/sc.uni-leipzig.de/fk67rahe/.netrc.
+wandb: Currently logged in as: koe-f (koe-f-no) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run bfvv4j78
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/wandb/run-20260329_185235-bfvv4j78
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run rostock_02
+wandb: ⭐️ View project at https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: 🚀 View run at https://wandb.ai/koe-f-no/obstacle-avoidance/runs/bfvv4j78
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: updating run metadata
+wandb: uploading model_499.pt; uploading output.log; uploading wandb-summary.json; uploading config.yaml
+wandb: uploading model_499.pt; uploading output.log
+wandb: uploading model_499.pt
+wandb: 
+wandb: Run history:
+wandb:         Episode/action_mean_ax ▂▂▂▃▂█▃▂▂▂▁▁▁▂▁▂▁▃▃▃▃▄▅▅▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆▆
+wandb:         Episode/action_mean_ay ▄▃▄▄▃▄▆▅▃█▆▅▄▅▄▄▃▄▄▃▃▃▃▃▂▃▃▃▄▃▁▁▁▁▂▂▂▂▂▂
+wandb:       Episode/action_mean_ayaw ▅▂▇▄▁▅▄▃▃▂▂▃▃▂▃▃▃▃▃▄▅▅▆▇███▇▆▇▆▆▆▆▆▇▇▇▇▇
+wandb:         Episode/action_mean_az ▅▅▆▃▃█▇▇▆▇▆▆▆▆▆▆▆▅▃▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: Episode/action_saturation_rate ▅▅▆▇▆▆▅▇▇███▇▇██▇▇▇▇▆▆▅▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:          Episode/obs_clip_rate ▆▇▇▇▆▇██▇▇▇▇▇▇▇▆▅▄▂▂▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:              Episode/rew_crash ▄▂▂▄▂▃▅▆▃█▅▄▃▃▃▄▄▅▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:  Episode/rew_distance_absolute ▅▄▃▃▃▂▁▁▂▃▂▁▁▁▂▁▂▂▁▂▃▃▆█████████████████
+wandb: Episode/rew_obstacle_proximity ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:            Episode/rew_success ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                            +12 ...
+wandb: 
+wandb: Run summary:
+wandb:         Episode/action_mean_ax 3.2483
+wandb:         Episode/action_mean_ay -1.12771
+wandb:       Episode/action_mean_ayaw 1.18617
+wandb:         Episode/action_mean_az -3.4047
+wandb: Episode/action_saturation_rate 3.40798
+wandb:          Episode/obs_clip_rate 1.3741
+wandb:              Episode/rew_crash -3.33333
+wandb:  Episode/rew_distance_absolute -0.11739
+wandb: Episode/rew_obstacle_proximity 0
+wandb:            Episode/rew_success 0
+wandb:                            +12 ...
+wandb: 
+wandb: 🚀 View run rostock_02 at: https://wandb.ai/koe-f-no/obstacle-avoidance/runs/bfvv4j78
+wandb: ⭐️ View project at: https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 6 other file(s)
+wandb: Find logs at: ./wandb/run-20260329_185235-bfvv4j78/logs

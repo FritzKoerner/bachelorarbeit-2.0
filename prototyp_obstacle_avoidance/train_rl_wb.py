@@ -25,7 +25,7 @@ class DictConfig(dict):
 def get_train_cfg(exp_name, max_iterations):
     return {
         # Runner-level
-        "num_steps_per_env":256,
+        "num_steps_per_env": 5,  # ~1 episode (30s / 0.25s decision_dt)
         "save_interval": 100,
         "max_iterations": max_iterations,
 
@@ -38,15 +38,15 @@ def get_train_cfg(exp_name, max_iterations):
         "algorithm": {
             "class_name": "PPO",
             "clip_param": 0.2,
-            "desired_kl": 0.01,
-            "entropy_coef": 0.01,
+            "desired_kl": None,
+            "entropy_coef": 0.001,
             "gamma": 0.99,
             "lam": 0.95,
-            "learning_rate": 3e-4,
+            "learning_rate": 0.001,
             "max_grad_norm": 1.0,
             "num_learning_epochs": 5,
             "num_mini_batches": 4,
-            "schedule": "adaptive",
+            "schedule": "fixed",
             "use_clipped_value_loss": True,
             "value_loss_coef": 1.0,
             "share_cnn_encoders": True,
@@ -56,8 +56,9 @@ def get_train_cfg(exp_name, max_iterations):
         # Actor (CNN + MLP)
         "actor": {
             "class_name": "CNNModel",
-            "hidden_dims": [256, 256],
+            "hidden_dims": [64, 64, 64],
             "activation": "elu",
+            "obs_normalization": True,
             "distribution_cfg": {
                 "class_name": "GaussianDistribution",
                 "init_std": 1.0,
@@ -68,9 +69,9 @@ def get_train_cfg(exp_name, max_iterations):
                     "output_channels": [32, 64, 128],
                     "kernel_size": [8, 4, 3],
                     "stride": [4, 2, 1],
-                    "padding": "zeros",
-                    "norm": "batch",
+                    "norm": "none",
                     "activation": "elu",
+                    "global_pool": "avg",
                     "flatten": True,
                 },
             },
@@ -79,8 +80,9 @@ def get_train_cfg(exp_name, max_iterations):
         # Critic (CNN shared from actor + separate MLP)
         "critic": {
             "class_name": "CNNModel",
-            "hidden_dims": [256, 256],
+            "hidden_dims": [32, 32],
             "activation": "elu",
+            "obs_normalization": True,
             # No cnn_cfg — PPO injects actor.cnns via share_cnn_encoders
         },
 
@@ -96,7 +98,8 @@ def get_cfgs():
     env_cfg = DictConfig({
         "num_actions": 4,
         "episode_length_s": 30.0,
-        "action_scales": [3.0, 3.0, 3.0],
+        "decimation": 100,             # PID runs at 100 Hz, RL decides every 25 steps (~4 Hz)
+        "action_scales": [1.0, 1.0, 1.0],
         # Drone spawn
         "spawn_offset": 5.0,
         "spawn_height_min": 10.0,
@@ -105,13 +108,16 @@ def get_cfgs():
         "target_x_range": [3.0, 3.0],
         "target_y_range": [3.0, 3.0],
         "target_z_range": [1.0, 1.0],
-        # Curriculum (obstacle density only — target always uses configured ranges)
-        "curriculum_steps": 240000,
+        # Spawn curriculum: drone starts near target for first N steps
+        "spawn_curriculum_steps": 60000,  # ~500 iters × 120 steps
+        "spawn_curriculum_radius": 1.0,   # meters from target
+        # Obstacle curriculum (density only)
+        "curriculum_steps": 3840000,
         "curriculum_n_obstacles": 5,
         # Success
         "hover_radius": 0.3,
         "success_vel_threshold": 0.3,
-        "hover_steps": 30,
+        "hover_steps": 1,              # ~0.5s at 4 Hz (closest to 0.3s)
         # Obstacles
         "num_obstacles": 8,
         "obstacle_size": [1.0, 1.0, 2.0],
@@ -126,7 +132,7 @@ def get_cfgs():
         "corridor_lateral_offset": 2.0,
         "post_curriculum_range": 5.0,
         # Depth camera
-        "render_interval": 2,
+        "render_interval": 1,
         "max_depth": 20.0,
         # Visualisation
         "visualize_target": False,
@@ -148,7 +154,7 @@ def get_cfgs():
             "pid_params_vel_z": [100.0, 2.0, 10.0],
             "pid_params_roll":  [6.0, 0.0, 3.0],
             "pid_params_pitch": [6.0, 0.0, 3.0],
-            "pid_params_yaw":   [1.0, 0.0, 0.2],
+            "pid_params_yaw":   [0.5, 0.0, 0.8],
         },
     })
 
@@ -157,19 +163,20 @@ def get_cfgs():
         "depth_res": 64,
         "depth_stack_size": 1,
         "obs_scales": {
-            "rel_pos": 1 / 30.0,
-            "lin_vel": 1 / 5.0,
+            "rel_pos": 1 / 15.0,
+            "lin_vel": 0.4,
             "ang_vel": 1 / 3.14159,
         },
     }
 
     reward_cfg = {
         "reward_scales": {
-            "distance":            -5.0,
-            "time":                -0.5,
+            # "distance_absolute":   1.0,
+            # "distance":   5.0,
+            "distance_flat":       5.0,
+            # "time":                -0.5,
             "obstacle_proximity": -6.0,
             "crash":             -100.0,
-            "obstacle_collision": -150.0,
             "success":            200.0,
         },
     }
@@ -181,8 +188,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="obstacle-avoidance")
     parser.add_argument("-v", "--vis", action="store_true", default=False)
-    parser.add_argument("-B", "--num_envs", type=int, default=16)
+    parser.add_argument("-B", "--num_envs", type=int, default=256)
     parser.add_argument("--max_iterations", type=int, default=401)
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Path to checkpoint to resume from (e.g. logs/obstacle-avoidance/model_300.pt)")
     args = parser.parse_args()
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning", performance_mode=True)
@@ -191,8 +200,9 @@ def main():
     env_cfg, obs_cfg, reward_cfg = get_cfgs()
     train_cfg = get_train_cfg(args.exp_name, args.max_iterations)
 
-    if os.path.exists(log_dir):
-        shutil.rmtree(log_dir)
+    if args.resume is None:
+        if os.path.exists(log_dir):
+            shutil.rmtree(log_dir)
     os.makedirs(log_dir, exist_ok=True)
 
     if args.vis:
@@ -213,6 +223,9 @@ def main():
     env.build()
 
     runner = OnPolicyRunner(env, copy.deepcopy(train_cfg), log_dir, device=gs.device)
+    if args.resume is not None:
+        runner.load(args.resume)
+        print(f"Resumed from {args.resume} at iteration {runner.current_learning_iteration}")
     runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
 
 

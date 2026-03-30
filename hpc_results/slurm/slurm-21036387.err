@@ -1,0 +1,27 @@
+W0326 13:09:15.812000 225209 torch/distributed/run.py:852] 
+W0326 13:09:15.812000 225209 torch/distributed/run.py:852] *****************************************
+W0326 13:09:15.812000 225209 torch/distributed/run.py:852] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0326 13:09:15.812000 225209 torch/distributed/run.py:852] *****************************************
+[W326 13:09:16.325336570 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [localhost]:37517 (errno: 97 - Address family not supported by protocol).
+[W326 13:09:16.326870405 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [localhost]:37517 (errno: 97 - Address family not supported by protocol).
+[W326 13:09:16.328390504 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [localhost]:37517 (errno: 97 - Address family not supported by protocol).
+[W326 13:09:16.379573019 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [paula10.sc.uni-leipzig.de]:33259 (errno: 97 - Address family not supported by protocol).
+[W326 13:11:16.259692763 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [paula10.sc.uni-leipzig.de]:33259 (errno: 97 - Address family not supported by protocol).
+[W326 13:11:16.259892655 socket.cpp:764] [c10d] The client socket cannot be initialized to connect to [paula10.sc.uni-leipzig.de]:33259 (errno: 97 - Address family not supported by protocol).
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+wandb: WARNING `start_method` is deprecated and will be removed in a future version of wandb. This setting is currently non-functional and safely ignored.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/sc.uni-leipzig.de/fk67rahe/.netrc.
+wandb: Currently logged in as: koe-f (koe-f-no) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run nybbx431
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/wandb/run-20260326_131118-nybbx431
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run test_run_multigpu
+wandb: ⭐️ View project at https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: 🚀 View run at https://wandb.ai/koe-f-no/obstacle-avoidance/runs/nybbx431
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+[2026-03-27T01:09:33.005] error: *** JOB 21036387 ON paula10 CANCELLED AT 2026-03-27T01:09:33 DUE TO TIME LIMIT ***

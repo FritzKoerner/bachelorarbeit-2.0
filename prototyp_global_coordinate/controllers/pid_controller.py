@@ -19,17 +19,24 @@ class VectorizedPIDController:
     - Derivative-on-measurement (avoids derivative kick on setpoint changes)
     - EMA-filtered derivative (reduces noise amplification)
     - Integral anti-windup via conditional integration (clamping)
+    - Optional angular mode for yaw/heading control (wraps errors to [-180, 180] deg)
     """
 
     def __init__(self, kp: float, ki: float, kd: float, n_envs: int, device,
-                 deriv_filter_alpha: float = 0.2):
+                 deriv_filter_alpha: float = 0.2, angular: bool = False):
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.deriv_filter_alpha = deriv_filter_alpha
+        self.angular = angular
         self.integral = torch.zeros(n_envs, device=device, dtype=torch.float32)
         self.prev_measurement = torch.zeros(n_envs, device=device, dtype=torch.float32)
         self.filtered_derivative = torch.zeros(n_envs, device=device, dtype=torch.float32)
+
+    @staticmethod
+    def _wrap_degrees(x: torch.Tensor) -> torch.Tensor:
+        """Wrap angle difference to [-180, 180] degrees."""
+        return torch.remainder(x + 180.0, 360.0) - 180.0
 
     def update(self, setpoint, measurement, dt: float, output_limit=None):
         """
@@ -43,9 +50,14 @@ class VectorizedPIDController:
             output: (n_envs,) tensor
         """
         error = setpoint - measurement
+        if self.angular:
+            error = self._wrap_degrees(error)
 
         # EMA-filtered derivative-on-measurement
-        raw_derivative = -(measurement - self.prev_measurement) / dt
+        meas_diff = measurement - self.prev_measurement
+        if self.angular:
+            meas_diff = self._wrap_degrees(meas_diff)
+        raw_derivative = -meas_diff / dt
         a = self.deriv_filter_alpha
         self.filtered_derivative = a * raw_derivative + (1 - a) * self.filtered_derivative
         self.prev_measurement = measurement.clone()
@@ -229,7 +241,7 @@ class DronePIDController:
             rpms = self._DronePIDController__mixer(**args)
             deltas = rpms - base  # show delta from base_rpm
             print(f"\n{name}:")
-            print(f"  FL={deltas[0]:+.0f}  FR={deltas[1]:+.0f}  BR={deltas[2]:+.0f}  BL={deltas[3]:+.0f}")
+            print(f"  BR={deltas[0]:+.0f}  FR={deltas[1]:+.0f}  FL={deltas[2]:+.0f}  BL={deltas[3]:+.0f}")
             print(f"  Expected: {expected}")
 
 
@@ -368,7 +380,8 @@ class CascadingPIDController:
         # Inner loop: attitude → corrections for mixer
         self.__pid_att_roll  = VectorizedPIDController(*pid_params["pid_params_roll"],  n_envs, device)
         self.__pid_att_pitch = VectorizedPIDController(*pid_params["pid_params_pitch"], n_envs, device)
-        self.__pid_att_yaw   = VectorizedPIDController(*pid_params["pid_params_yaw"],   n_envs, device)
+        self.__pid_att_yaw   = VectorizedPIDController(*pid_params["pid_params_yaw"],   n_envs, device,
+                                                        deriv_filter_alpha=0.4, angular=True)
 
         self.drone = drone
         self.__dt = dt
@@ -424,11 +437,17 @@ class CascadingPIDController:
         accel_y = self.__pid_vel_y.update(vel_des_y, curr_vel[:, 1], self.__dt)
         thrust = self.__pid_vel_z.update(vel_des_z, curr_vel[:, 2], self.__dt)
 
-        # Velocity-to-attitude mapping (derived from URDF + mixer signs):
-        #   +pitch → back motors up, nose down → +X accel  ⇒  des_pitch = +accel_x
-        #   +roll  → left motors up, tilt right → -Y accel ⇒  des_roll  = -accel_y
-        des_pitch = torch.clamp(accel_x, -self.__max_tilt, self.__max_tilt)
-        des_roll = torch.clamp(-accel_y, -self.__max_tilt, self.__max_tilt)
+        # Yaw-decoupled velocity-to-attitude mapping:
+        # The velocity PID outputs world-frame accelerations, but roll/pitch
+        # are body-frame angles.  Rotate by current yaw so the mapping stays
+        # correct at any heading.  (At yaw=0 this reduces to the original.)
+        yaw_rad = torch.deg2rad(curr_att[:, 2])
+        cos_yaw = torch.cos(yaw_rad)
+        sin_yaw = torch.sin(yaw_rad)
+        des_pitch = torch.clamp( accel_x * cos_yaw + accel_y * sin_yaw,
+                                -self.__max_tilt, self.__max_tilt)
+        des_roll  = torch.clamp( accel_x * sin_yaw - accel_y * cos_yaw,
+                                -self.__max_tilt, self.__max_tilt)
 
         # --- Inner loop: Attitude PID → corrections for mixer ---
         roll_corr = self.__pid_att_roll.update(des_roll, curr_att[:, 0], self.__dt)

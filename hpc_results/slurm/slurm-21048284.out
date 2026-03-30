@@ -1,0 +1,16 @@
+=== Starting training: Fri Mar 27 04:01:37 PM CET 2026 ===
+Host: paula07.sc.uni-leipzig.de, GPU: NVIDIA A30
+Experiment: curr_1m, Seed: 0
+[ObstacleAvoidanceEnv] Renderer: BatchRenderer (cfg='auto')
+[38;5;226m[Genesis] [16:01:51] [WARNING] Falling back to legacy URDF parser. Default values of physics properties may be off:
+Error: unknown or unsupported mesh file: '/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/assets/robots/draugas/meshes/main_body.dae' - Element name 'main_body', id 0[0m
+[38;5;226m[Genesis] [16:01:51] [WARNING] Some free joint has non-zero frictionloss, damping or armature parameters. Beware it is non-physical.[0m
+[38;5;226m[Genesis] [16:01:57] [WARNING] Link 'prop0_link' has dubious mass 0.000 compared to the estimate from geometry 0.006 given material density 200.[0m
+[38;5;226m[Genesis] [16:01:57] [WARNING] Ignoring inertia matrix of link 'prop0_link' because center of mass is not specified.[0m
+[38;5;226m[Genesis] [16:01:57] [WARNING] Link 'prop1_link' has dubious mass 0.000 compared to the estimate from geometry 0.006 given material density 200.[0m
+[38;5;226m[Genesis] [16:01:57] [WARNING] Ignoring inertia matrix of link 'prop1_link' because center of mass is not specified.[0m
+[38;5;226m[Genesis] [16:01:57] [WARNING] Link 'prop2_link' has dubious mass 0.000 compared to the estimate from geometry 0.006 given material density 200.[0m
+[38;5;226m[Genesis] [16:01:57] [WARNING] Ignoring inertia matrix of link 'prop2_link' because center of mass is not specified.[0m
+[38;5;226m[Genesis] [16:01:57] [WARNING] Link 'prop3_link' has dubious mass 0.000 compared to the estimate from geometry 0.006 given material density 200.[0m
+[38;5;226m[Genesis] [16:01:57] [WARNING] Ignoring inertia matrix of link 'prop3_link' because center of mass is not specified.[0m
+=== Training complete: Fri Mar 27 04:07:38 PM CET 2026 ===

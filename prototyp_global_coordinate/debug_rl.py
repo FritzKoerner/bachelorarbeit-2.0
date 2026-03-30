@@ -9,6 +9,7 @@ Usage:
     python debug_rl.py --ckpt 300 --episodes 1 --stochastic  # stochastic actions
     python debug_rl.py --random                          # random policy (env sanity check)
     python debug_rl.py --zero                            # zero actions (hover check)
+    python debug_rl.py --log_dir ../hpc_results/...           # auto-picks latest ckpt
     python debug_rl.py --log_dir ../hpc_results/... --ckpt 400
 """
 
@@ -25,9 +26,27 @@ import numpy as np
 import torch
 
 from rsl_rl.runners import OnPolicyRunner
+import glob as globmod
+
 import genesis as gs
 from envs.coordinate_landing_env import CoordinateLandingEnv
 from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl from W&B training
+
+
+def find_latest_ckpt(log_dir):
+    """Find the highest-numbered model_*.pt checkpoint in log_dir."""
+    pattern = os.path.join(log_dir, "model_*.pt")
+    files = globmod.glob(pattern)
+    if not files:
+        return None
+    iters = []
+    for f in files:
+        base = os.path.basename(f)  # model_300.pt
+        try:
+            iters.append(int(base.split("_")[1].split(".")[0]))
+        except (IndexError, ValueError):
+            continue
+    return max(iters) if iters else None
 
 
 # ---------------------------------------------------------------------------
@@ -348,12 +367,16 @@ def main():
                         help="Zero actions / hover (ignores --ckpt)")
     args = parser.parse_args()
 
-    if not args.random and not args.zero and args.ckpt is None:
-        parser.error("Specify --ckpt N, --random, or --zero")
-
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
 
     log_dir = args.log_dir if args.log_dir else f"logs/{args.exp_name}"
+
+    # Auto-detect latest checkpoint when none specified
+    if not args.random and not args.zero and args.ckpt is None:
+        args.ckpt = find_latest_ckpt(log_dir)
+        if args.ckpt is None:
+            parser.error(f"No checkpoints found in {log_dir}. Specify --ckpt N, --random, or --zero")
+        print(f"Auto-selected latest checkpoint: model_{args.ckpt}.pt")
 
     if args.random or args.zero:
         cfg_path = os.path.join(log_dir, "cfgs.pkl")

@@ -9,6 +9,7 @@ Usage:
     python debug_rl.py --ckpt 300 --episodes 1 --stochastic  # stochastic actions
     python debug_rl.py --random                          # random policy (env sanity check)
     python debug_rl.py --zero                            # zero actions (hover check)
+    python debug_rl.py --log_dir ../hpc_results/...           # auto-picks latest ckpt
     python debug_rl.py --log_dir ../hpc_results/... --ckpt 400
 """
 
@@ -21,13 +22,32 @@ import pickle
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpecFromSubplotSpec
 import numpy as np
 import torch
 
 from rsl_rl.runners import OnPolicyRunner
+import glob as globmod
+
 import genesis as gs
 from envs.obstacle_avoidance_env import ObstacleAvoidanceEnv
 from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl from W&B training
+
+
+def find_latest_ckpt(log_dir):
+    """Find the highest-numbered model_*.pt checkpoint in log_dir."""
+    pattern = os.path.join(log_dir, "model_*.pt")
+    files = globmod.glob(pattern)
+    if not files:
+        return None
+    iters = []
+    for f in files:
+        base = os.path.basename(f)  # model_300.pt
+        try:
+            iters.append(int(base.split("_")[1].split(".")[0]))
+        except (IndexError, ValueError):
+            continue
+    return max(iters) if iters else None
 
 
 # ---------------------------------------------------------------------------
@@ -59,6 +79,7 @@ def collect_episode_debug(env, actor, critic, *, stochastic=False):
         # Depth stats
         "depth_mean": [],
         "depth_min": [],
+        "depth_frames": [],
     }
 
     obs = env.reset()
@@ -107,6 +128,7 @@ def collect_episode_debug(env, actor, critic, *, stochastic=False):
         data["min_obstacle_dist"].append(min_obs_dist)
         data["depth_mean"].append(depth_mean)
         data["depth_min"].append(depth_min)
+        data["depth_frames"].append(depth_frame.cpu().numpy().copy())
 
         if dones[0].item():
             # Record outcome from terminal state (set before reset)
@@ -126,7 +148,7 @@ def collect_episode_policy(env, policy_fn):
     data = {
         "obs": [], "actions": [], "reward_total": [], "reward_components": [],
         "distance": [], "pos": [], "min_obstacle_dist": [],
-        "depth_mean": [], "depth_min": [],
+        "depth_mean": [], "depth_min": [], "depth_frames": [],
     }
     obs = env.reset()
 
@@ -155,6 +177,7 @@ def collect_episode_policy(env, policy_fn):
         data["min_obstacle_dist"].append(min_obs_dist)
         data["depth_mean"].append(depth_frame.mean().item())
         data["depth_min"].append(depth_frame.min().item())
+        data["depth_frames"].append(depth_frame.cpu().numpy().copy())
 
         if dones[0].item():
             data["outcome"] = (
@@ -191,9 +214,21 @@ def plot_episode(data, ep_idx, out_dir, ckpt_label):
     act_arr = np.array(data["actions"])     # (T, 4)
     has_dist = "action_mean" in data
 
-    # Panels: obs, actions, rewards, [value if model], distance+obstacle, depth
-    n_rows = 6 if has_dist else 5
-    fig, axes = plt.subplots(n_rows, 1, figsize=(14, 3.2 * n_rows), sharex=True)
+    # Panels: obs, actions, rewards, [value if model], distance+obstacle, depth_stats, [depth_frames]
+    n_ts_rows = 6 if has_dist else 5
+    has_depth_frames = len(data.get("depth_frames", [])) > 0
+
+    if has_depth_frames:
+        fig = plt.figure(figsize=(14, 3.2 * n_ts_rows + 2.5))
+        gs = fig.add_gridspec(n_ts_rows + 1, 1,
+                              height_ratios=[3.2] * n_ts_rows + [2.5],
+                              hspace=0.3)
+        axes = [fig.add_subplot(gs[0])]
+        for i in range(1, n_ts_rows):
+            axes.append(fig.add_subplot(gs[i], sharex=axes[0]))
+    else:
+        fig, axes = plt.subplots(n_ts_rows, 1, figsize=(14, 3.2 * n_ts_rows), sharex=True)
+        gs = None
     outcome = data.get("outcome", "?")
     fig.suptitle(
         f"Episode {ep_idx + 1}  |  {n_steps} steps  |  outcome: {outcome}  |  ckpt: {ckpt_label}",
@@ -292,6 +327,19 @@ def plot_episode(data, ep_idx, out_dir, ckpt_label):
     ax.legend(fontsize=8)
 
     axes[-1].set_xlabel("Step")
+
+    # --- Depth frame strip (sampled thumbnails) ---
+    if has_depth_frames:
+        n_samples = min(10, n_steps)
+        depth_indices = np.linspace(0, n_steps - 1, n_samples, dtype=int)
+        gs_frames = GridSpecFromSubplotSpec(1, n_samples, subplot_spec=gs[n_ts_rows],
+                                           wspace=0.08)
+        for i, idx in enumerate(depth_indices):
+            ax_f = fig.add_subplot(gs_frames[0, i])
+            ax_f.imshow(data["depth_frames"][idx], cmap="inferno", vmin=0, vmax=1)
+            ax_f.set_title(f"t={idx}", fontsize=7, pad=2)
+            ax_f.axis("off")
+
     plt.tight_layout()
 
     os.makedirs(out_dir, exist_ok=True)
@@ -412,12 +460,16 @@ def main():
                         help="Zero actions / hover (ignores --ckpt)")
     args = parser.parse_args()
 
-    if not args.random and not args.zero and args.ckpt is None:
-        parser.error("Specify --ckpt N, --random, or --zero")
-
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
 
     log_dir = args.log_dir if args.log_dir else f"logs/{args.exp_name}"
+
+    # Auto-detect latest checkpoint when none specified
+    if not args.random and not args.zero and args.ckpt is None:
+        args.ckpt = find_latest_ckpt(log_dir)
+        if args.ckpt is None:
+            parser.error(f"No checkpoints found in {log_dir}. Specify --ckpt N, --random, or --zero")
+        print(f"Auto-selected latest checkpoint: model_{args.ckpt}.pt")
 
     if args.random or args.zero:
         # Need config even without a checkpoint — look for cfgs.pkl or use defaults

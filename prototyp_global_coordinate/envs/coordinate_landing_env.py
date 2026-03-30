@@ -50,8 +50,10 @@ class CoordinateLandingEnv:
         self.num_actions = env_cfg["num_actions"]   # 4
         self.device = gs.device
 
-        self.dt = 0.01  # 100 Hz
-        self.max_episode_length = math.ceil(env_cfg["episode_length_s"] / self.dt)
+        self.dt = 0.01  # 100 Hz physics
+        self.decimation = env_cfg.get("decimation", 1)  # RL decision every N physics steps
+        self.decision_dt = self.dt * self.decimation      # effective RL timestep
+        self.max_episode_length = math.ceil(env_cfg["episode_length_s"] / self.decision_dt)
 
         self.env_cfg = env_cfg
         self.obs_cfg = obs_cfg
@@ -137,12 +139,12 @@ class CoordinateLandingEnv:
             device=gs.device,
         )
 
-        # Multiply per-step rewards by dt so their magnitude is time-independent.
+        # Multiply per-step rewards by decision_dt so their magnitude is time-independent.
         # Terminal rewards (crash) are one-time events and must NOT be scaled by dt.
         per_step_rewards = {"distance", "time"}
         for name in self.reward_scales:
             if name in per_step_rewards:
-                self.reward_scales[name] *= self.dt
+                self.reward_scales[name] *= self.decision_dt
 
         self.reward_functions = {
             name: getattr(self, "_reward_" + name)
@@ -177,6 +179,11 @@ class CoordinateLandingEnv:
 
         # Hover counter: counts consecutive steps within hover_radius of target
         self.hover_counter = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_int)
+
+        # Unstable buffer: once a drone becomes unstable in an episode,
+        # it stays frozen at frozen_pos (no gravity, no movement) until reset.
+        self.unstable_buf = torch.zeros((self.num_envs,), device=gs.device, dtype=torch.bool)
+        self.frozen_pos = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
 
         self.global_step = 0  # counts calls to step(); used for curriculum
 
@@ -213,12 +220,39 @@ class CoordinateLandingEnv:
         target_yaw = self.actions[:, 3] * 180.0  # absolute yaw (degrees)
         target_pos = torch.stack([target_x, target_y, target_z], dim=-1)
 
-        # PID → motor RPMs → physics step
-        rpms = self.controller.update(target_pos, target_yaw)
-        self.drone.set_propellels_rpm(rpms)
         if self.target_vis is not None:
             self.target_vis.set_pos(self.target_pos, zero_velocity=True)
-        self.scene.step()
+
+        # Run physics N times per RL decision (decimation).
+        # PID tracks the same target each substep; state is read after the last one.
+        # With high decimation, early random actions can cause extreme states mid-loop.
+        # Kill motors for unstable envs to prevent NaN accelerations in the solver;
+        # the post-loop crash check will reset them normally.
+        for _ in range(self.decimation):
+            rpms = self.controller.update(target_pos, target_yaw)
+            curr_pos = self.drone.get_pos()
+            curr_att = quat_to_xyz(self.drone.get_quat(), rpy=True, degrees=True)
+            newly_unstable = (
+                (curr_pos[:, 2] < 0.2)
+                | (torch.abs(curr_att[:, 0]) > 60.0)
+                | (torch.abs(curr_att[:, 1]) > 60.0)
+                | (torch.norm(self.drone.get_vel(), dim=1) > 20.0)
+            ) & ~self.unstable_buf
+            # Latch: record frozen position for newly unstable drones
+            if newly_unstable.any():
+                self.frozen_pos[newly_unstable] = curr_pos[newly_unstable].clone()
+                self.unstable_buf |= newly_unstable
+            # Freeze all unstable drones (newly + previously) at their frozen position
+            if self.unstable_buf.any():
+                unstable_idx = self.unstable_buf.nonzero(as_tuple=False).reshape(-1)
+                rpms[self.unstable_buf] = 0.0
+                self.drone.set_pos(
+                    self.frozen_pos[unstable_idx],
+                    zero_velocity=True,
+                    envs_idx=unstable_idx,
+                )
+            self.drone.set_propellels_rpm(rpms)
+            self.scene.step()
 
         # Update state buffers
         self.episode_length_buf += 1
@@ -341,6 +375,7 @@ class CoordinateLandingEnv:
         self.episode_length_buf[envs_idx] = 0
         self.reset_buf[envs_idx]          = True
         self.hover_counter[envs_idx]      = 0
+        self.unstable_buf[envs_idx]       = False
 
         # Log episode stats
         self.extras["episode"] = {}

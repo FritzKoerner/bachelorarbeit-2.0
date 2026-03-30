@@ -25,7 +25,7 @@ class DictConfig(dict):
 def get_train_cfg(exp_name, max_iterations):
     return {
         # Runner-level
-        "num_steps_per_env": 100,
+        "num_steps_per_env": 2,
         "save_interval": 100,
 
         # ── W&B logging ──────────────────────────────────────────────
@@ -82,6 +82,7 @@ def get_train_cfg(exp_name, max_iterations):
 def get_cfgs():
     env_cfg = DictConfig({
         "num_actions": 4,
+        "decimation": 300,            # PID runs at 100 Hz, RL decides every 3 s
         "episode_length_s": 30.0,
         # Action scaling: maps [-1,1] → offset from current drone position (metres).
         "action_scales": [6.0, 6.0, 6.0],
@@ -100,7 +101,7 @@ def get_cfgs():
         # Success: hover within radius at low velocity for N consecutive steps
         "hover_radius": 0.3,             # metres
         "success_vel_threshold": 0.3,    # m/s  (body frame)
-        "hover_steps": 30,               # 0.3 s at 100 Hz
+        "hover_steps": 1,                # 3 s at 1/3 Hz
         # Visualisation
         "visualize_target": False,
         "env_spacing": 40.0,
@@ -124,7 +125,7 @@ def get_cfgs():
             # Attitude loop → mixer corrections
             "pid_params_roll":  [6.0, 0.0, 3.0],
             "pid_params_pitch": [6.0, 0.0, 3.0],
-            "pid_params_yaw":   [1.0, 0.0, 0.2],
+            "pid_params_yaw":   [0.5, 0.0, 0.8],
         },
     })
 
@@ -132,7 +133,7 @@ def get_cfgs():
         "num_obs": 17,
         "obs_scales": {
             "rel_pos":    1 / 15.0,
-            "lin_vel":    1 / 2.5,
+            "lin_vel":    0.4,
             "ang_vel":    1 / 3.14159,
         },
     }

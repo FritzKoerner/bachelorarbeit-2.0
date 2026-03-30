@@ -1,0 +1,30 @@
+/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/_compile.py:54: UserWarning: optimizer contains a parameter group with duplicate parameters; in future, this will cause an error; see github.com/pytorch/pytorch/issues/40967 for more information
+  return disable_fn(*args, **kwargs)
+wandb: WARNING `start_method` is deprecated and will be removed in a future version of wandb. This setting is currently non-functional and safely ignored.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/sc.uni-leipzig.de/fk67rahe/.netrc.
+wandb: Currently logged in as: koe-f (koe-f-no) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run 1n56oxn1
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/wandb/run-20260328_123251-1n56oxn1
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run 1hz_fix_fix
+wandb: ⭐️ View project at https://wandb.ai/koe-f-no/obstacle-avoidance
+wandb: 🚀 View run at https://wandb.ai/koe-f-no/obstacle-avoidance/runs/1n56oxn1
+Traceback (most recent call last):
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/train_rl_wb.py", line 232, in <module>
+    main()
+    ~~~~^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/train_rl_wb.py", line 228, in main
+    runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/.conda/envs/ba_v04/lib/python3.13/site-packages/rsl_rl/runners/on_policy_runner.py", line 87, in learn
+    obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
+                                  ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_obstacle_avoidance/envs/obstacle_avoidance_env.py", line 601, in step
+    (curr_pos[:, 2] < 0.2)
+    ~~~~~~~~~~~~~~~~~~~~~~
+    | (curr_att > 60.0)
+    ^~~~~~~~~~~~~~~~~~~
+  File "/home/sc.uni-leipzig.de/fk67rahe/.local/lib/python3.13/site-packages/torch/utils/_device.py", line 109, in __torch_function__
+    return func(*args, **kwargs)
+RuntimeError: The size of tensor a (256) must match the size of tensor b (3) at non-singleton dimension 1

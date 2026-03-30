@@ -1,0 +1,50 @@
+wandb: WARNING `start_method` is deprecated and will be removed in a future version of wandb. This setting is currently non-functional and safely ignored.
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/sc.uni-leipzig.de/fk67rahe/.netrc.
+wandb: Currently logged in as: koe-f (koe-f-no) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run twq4elmi
+wandb: Tracking run with wandb version 0.25.1
+wandb: Run data is saved locally in /home/sc.uni-leipzig.de/fk67rahe/genesis_v04/prototyp_global_coordinate/wandb/run-20260321_093108-twq4elmi
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run adj_scales_2.0
+wandb: ⭐️ View project at https://wandb.ai/koe-f-no/drone-landing
+wandb: 🚀 View run at https://wandb.ai/koe-f-no/drone-landing/runs/twq4elmi
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: WARNING Symlinked 1 file into the W&B run directory; call wandb.save again to sync new files.
+wandb: updating run metadata
+wandb: uploading config.yaml; uploading model_400.pt; uploading output.log; uploading wandb-summary.json
+wandb: uploading model_400.pt; uploading output.log
+wandb: uploading history steps 392-400, summary, console lines 11381-11633
+wandb: 
+wandb: Run history:
+wandb:         Episode/action_mean_ax ▂▁▁▁▁▁▁▁▃████▄▂▂▂▂▂▂▃▂▃▃▃▂▃▃▃▃▃▃▃▃▃▃▃▃▃▃
+wandb:         Episode/action_mean_ay ▅▆▇██▅▁▁▃▅▃▃▃▂▂▂▂▂▂▂▂▂▂▂▂▃▂▂▂▂▂▁▂▂▂▂▂▂▂▂
+wandb:       Episode/action_mean_ayaw ▅▅▅▅▆▆▆███▇▇▇▁▁▁▂▃▃▃▂▂▂▃▃▂▂▃▂▃▂▃▃▃▃▃▃▃▃▃
+wandb:         Episode/action_mean_az ██▆▆▆▆▆▆▆▅▄▄▄▂▂▁▁▁▁▁▂▃▃▃▃▃▃▃▃▄▄▄▄▄▄▄▄▄▄▄
+wandb: Episode/action_saturation_rate ▃▄▄▅▆██████████▇█████▄▂▂▂▂▂▂▂▂▂▁▁▁▁▁▁▁▁▁
+wandb:          Episode/obs_clip_rate ▁▁▁▂▅▃▃▅▅█▆▄▃▃▃▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:              Episode/rew_crash ████████▁███████████████▇▂▂▅▇▇▇▇▇▇▇▇▇▇▇█
+wandb:           Episode/rew_distance █▆▃▃▃▃▃▂▁▁▂▃▄▆▇▇▇▇▇█████████████████████
+wandb:            Episode/rew_success ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▇█▇▇████▇▆▇▇▇▇▇▇▇▇▇█
+wandb:               Episode/rew_time █▇▅▁▁▁▁▁▁▁▁▁▁▅▆▅▆▆▆▆▇▆▆▆▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇▇
+wandb:                            +11 ...
+wandb: 
+wandb: Run summary:
+wandb:         Episode/action_mean_ax 20.75365
+wandb:         Episode/action_mean_ay 1.11664
+wandb:       Episode/action_mean_ayaw -220.31561
+wandb:         Episode/action_mean_az -329.3089
+wandb: Episode/action_saturation_rate 424.01575
+wandb:          Episode/obs_clip_rate 36.53027
+wandb:              Episode/rew_crash -0.37482
+wandb:           Episode/rew_distance -4.88355
+wandb:            Episode/rew_success 5.91703
+wandb:               Episode/rew_time -0.10938
+wandb:                            +11 ...
+wandb: 
+wandb: 🚀 View run adj_scales_2.0 at: https://wandb.ai/koe-f-no/drone-landing/runs/twq4elmi
+wandb: ⭐️ View project at: https://wandb.ai/koe-f-no/drone-landing
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 5 other file(s)
+wandb: Find logs at: ./wandb/run-20260321_093108-twq4elmi/logs

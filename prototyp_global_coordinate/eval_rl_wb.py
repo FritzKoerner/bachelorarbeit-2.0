@@ -4,6 +4,7 @@ import glob
 import os
 import pickle
 import re
+import sys
 
 import matplotlib
 matplotlib.use("Agg")
@@ -34,6 +35,40 @@ def find_latest_checkpoint(log_dir: str) -> tuple[str, int]:
         return int(m.group(1)) if m else -1
     best = max(files, key=iter_num)
     return best, iter_num(best)
+
+
+def resolve_hpc_log_dir(run_name):
+    """Resolve --hpc run name to log_dir path, or list available runs and exit."""
+    proto_dir = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
+    hpc_base = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "hpc_results", proto_dir
+    ))
+    if run_name == "list":
+        if not os.path.isdir(hpc_base):
+            print(f"No HPC results directory: {hpc_base}")
+            sys.exit(1)
+        runs = sorted(d for d in os.listdir(hpc_base)
+                      if os.path.isdir(os.path.join(hpc_base, d)))
+        if not runs:
+            print(f"No runs in {hpc_base}")
+            sys.exit(1)
+        print(f"\nAvailable HPC runs ({hpc_base}):")
+        for r in runs:
+            ckpts = glob.glob(os.path.join(hpc_base, r, "model_*.pt"))
+            iters = sorted(int(re.search(r"model_(\d+)", c).group(1))
+                           for c in ckpts if re.search(r"model_(\d+)", c))
+            print(f"  {r:30s}  checkpoints: {iters}")
+        sys.exit(0)
+    run_dir = os.path.join(hpc_base, run_name)
+    if not os.path.isdir(run_dir):
+        print(f"HPC run not found: {run_dir}")
+        if os.path.isdir(hpc_base):
+            runs = [d for d in os.listdir(hpc_base)
+                    if os.path.isdir(os.path.join(hpc_base, d))]
+            if runs:
+                print(f"Available: {', '.join(sorted(runs))}")
+        sys.exit(1)
+    return run_dir
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +273,8 @@ def log_to_wandb(results: list[dict], stats: dict, fig: plt.Figure, ckpt_iter: i
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name",   type=str, default="drone-landing")
+    parser.add_argument("--hpc",              nargs="?", const="list", default=None,
+                        help="HPC run name (e.g. 'new_version'). No value = list runs.")
     parser.add_argument("--log_dir",          type=str, default=None,
                         help="Direct path to log dir (overrides --exp_name)")
     parser.add_argument("--ckpt",             type=int, default=None,
@@ -251,7 +288,12 @@ def main():
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
 
-    log_dir = args.log_dir if args.log_dir else f"logs/{args.exp_name}"
+    if args.hpc is not None:
+        log_dir = resolve_hpc_log_dir(args.hpc)
+    elif args.log_dir:
+        log_dir = args.log_dir
+    else:
+        log_dir = f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, train_cfg = pickle.load(
         open(f"{log_dir}/cfgs.pkl", "rb")
     )
@@ -354,8 +396,14 @@ if __name__ == "__main__":
 # Evaluate latest checkpoint, log to W&B
 python eval_rl_wb.py
 
-# Evaluate HPC results
-python eval_rl_wb.py --log_dir ../hpc_results/prototyp_global_coordinate/my_run
+# List available HPC runs
+python eval_rl_wb.py --hpc
+
+# Evaluate HPC run (latest checkpoint)
+python eval_rl_wb.py --hpc new_version
+
+# Evaluate HPC run (specific checkpoint)
+python eval_rl_wb.py --hpc new_version --ckpt 400
 
 # Evaluate specific checkpoint
 python eval_rl_wb.py --ckpt 300

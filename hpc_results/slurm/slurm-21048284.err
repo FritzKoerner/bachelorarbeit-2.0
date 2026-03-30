@@ -1,0 +1,4 @@
+dt.createDevice(phy, &dev_create_info, nullptr, &dev): ERROR_INITIALIZATION_FAILED
+Error at /project/src/render/vk/backend.cpp:946 in Device *madrona::render::vk::Backend::makeDevice(VkPhysicalDevice, Span<const VkSurfaceKHR>)
+dt.createDevice(phy, &dev_create_info, nullptr, &dev)
+/var/spool/slurmd/job21048284/slurm_script: line 28: 2968699 Aborted                 (core dumped) python train_rl_wb.py -e curr_1m -B 512 --max_iterations 15000
