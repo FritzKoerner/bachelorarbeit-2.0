@@ -25,7 +25,7 @@ class DictConfig(dict):
 def get_train_cfg(exp_name, max_iterations):
     return {
         # Runner-level
-        "num_steps_per_env": 2,
+        "num_steps_per_env": 16,
         "save_interval": 100,
 
         # ── W&B logging ──────────────────────────────────────────────
@@ -82,10 +82,10 @@ def get_train_cfg(exp_name, max_iterations):
 def get_cfgs():
     env_cfg = DictConfig({
         "num_actions": 4,
-        "decimation": 300,            # PID runs at 100 Hz, RL decides every 3 s
-        "episode_length_s": 30.0,
+        "decimation": 100,            # PID runs at 100 Hz, RL decides every 1 s
+        "episode_length_s": 60.0,
         # Action scaling: maps [-1,1] → offset from current drone position (metres).
-        "action_scales": [6.0, 6.0, 6.0],
+        "action_scales": [1.0, 1.0, 1.0],
         # Drone spawn randomisation
         "spawn_offset": 5.0,        # drone x/y in [-5, +5] m
         "spawn_height_min": 10.0,
@@ -98,10 +98,8 @@ def get_cfgs():
         # curriculum_radius of drone spawn.  curriculum_steps = N_iters × num_steps_per_env
         "curriculum_steps": 0,        # disabled — full target range from start
         "curriculum_radius": 1.0,    # (unused when curriculum_steps=0)
-        # Success: hover within radius at low velocity for N consecutive steps
+        # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,             # metres
-        "success_vel_threshold": 0.3,    # m/s  (body frame)
-        "hover_steps": 1,                # 3 s at 1/3 Hz
         # Visualisation
         "visualize_target": False,
         "env_spacing": 40.0,

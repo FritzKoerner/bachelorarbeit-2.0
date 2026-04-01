@@ -177,9 +177,6 @@ class CoordinateLandingEnv:
         self.rel_pos     = torch.zeros_like(self.base_pos)
         self.last_rel_pos = torch.zeros_like(self.base_pos)
 
-        # Hover counter: counts consecutive steps within hover_radius of target
-        self.hover_counter = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_int)
-
         # Unstable buffer: once a drone becomes unstable in an episode,
         # it stays frozen at frozen_pos (no gravity, no movement) until reset.
         self.unstable_buf = torch.zeros((self.num_envs,), device=gs.device, dtype=torch.bool)
@@ -228,6 +225,7 @@ class CoordinateLandingEnv:
         # With high decimation, early random actions can cause extreme states mid-loop.
         # Kill motors for unstable envs to prevent NaN accelerations in the solver;
         # the post-loop crash check will reset them normally.
+        inside_target_all_substeps = torch.ones(self.num_envs, device=gs.device, dtype=torch.bool)
         for _ in range(self.decimation):
             rpms = self.controller.update(target_pos, target_yaw)
             curr_pos = self.drone.get_pos()
@@ -254,6 +252,10 @@ class CoordinateLandingEnv:
             self.drone.set_propellels_rpm(rpms)
             self.scene.step()
 
+            # Track whether drone stays inside target area throughout decision step
+            substep_dist = torch.norm(self.target_pos - self.drone.get_pos(), dim=1)
+            inside_target_all_substeps &= (substep_dist < self.env_cfg["hover_radius"])
+
         # Update state buffers
         self.episode_length_buf += 1
         self.last_base_pos[:] = self.base_pos[:]
@@ -270,13 +272,6 @@ class CoordinateLandingEnv:
         self.base_lin_vel[:] = transform_by_quat(self.drone.get_vel(), inv_base_quat)
         self.base_ang_vel[:] = transform_by_quat(self.drone.get_ang(), inv_base_quat)
 
-        # Hover counter — increments only when close AND nearly stationary
-        close_enough = torch.norm(self.rel_pos, dim=1) < self.env_cfg["hover_radius"]
-        slow_enough  = torch.norm(self.base_lin_vel, dim=1) < self.env_cfg["success_vel_threshold"]
-        near_target  = close_enough & slow_enough
-        self.hover_counter[ near_target] += 1
-        self.hover_counter[~near_target]  = 0
-
         # Termination
         self.crash_condition = (
             (self.base_pos[:, 2] < 0.2)
@@ -284,7 +279,8 @@ class CoordinateLandingEnv:
             | (torch.abs(base_euler[:, 1]) > 60.0)
             | (torch.norm(self.rel_pos, dim=1) > 50.0)
         )
-        self.success_condition = self.hover_counter >= self.env_cfg["hover_steps"]
+        # Success: drone stayed within hover_radius for the entire decision step
+        self.success_condition = inside_target_all_substeps
         timeout_condition = self.episode_length_buf > self.max_episode_length
 
         self.penalty_condition = self.crash_condition | timeout_condition
@@ -374,7 +370,6 @@ class CoordinateLandingEnv:
         self.last_actions[envs_idx]      = 0.0
         self.episode_length_buf[envs_idx] = 0
         self.reset_buf[envs_idx]          = True
-        self.hover_counter[envs_idx]      = 0
         self.unstable_buf[envs_idx]       = False
 
         # Log episode stats
