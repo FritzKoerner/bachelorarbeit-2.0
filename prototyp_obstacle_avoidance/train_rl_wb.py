@@ -25,7 +25,7 @@ class DictConfig(dict):
 def get_train_cfg(exp_name, max_iterations):
     return {
         # Runner-level
-        "num_steps_per_env": 5,  # ~1 episode (30s / 0.25s decision_dt)
+        "num_steps_per_env": 5,  # short rollouts (5 decisions at 1 Hz = 5s)
         "save_interval": 100,
         "max_iterations": max_iterations,
 
@@ -97,8 +97,8 @@ def get_train_cfg(exp_name, max_iterations):
 def get_cfgs():
     env_cfg = DictConfig({
         "num_actions": 4,
-        "episode_length_s": 30.0,
-        "decimation": 100,             # PID runs at 100 Hz, RL decides every 25 steps (~4 Hz)
+        "episode_length_s": 60.0,
+        "decimation": 100,             # PID runs at 100 Hz, RL decides every 100 steps (1 Hz)
         "action_scales": [1.0, 1.0, 1.0],
         # Drone spawn
         "spawn_offset": 5.0,
@@ -114,10 +114,8 @@ def get_cfgs():
         # Obstacle curriculum (density only)
         "curriculum_steps": 3840000,
         "curriculum_n_obstacles": 5,
-        # Success
+        # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,
-        "success_vel_threshold": 0.3,
-        "hover_steps": 1,              # ~0.5s at 4 Hz (closest to 0.3s)
         # Obstacles
         "num_obstacles": 8,
         "obstacle_size": [1.0, 1.0, 2.0],
@@ -171,13 +169,11 @@ def get_cfgs():
 
     reward_cfg = {
         "reward_scales": {
-            # "distance_absolute":   1.0,
-            # "distance":   5.0,
-            "distance_flat":       5.0,
-            # "time":                -0.5,
+            "distance":           -5.0,
+            "time":               -0.5,
             "obstacle_proximity": -6.0,
-            "crash":             -100.0,
-            "success":            200.0,
+            "crash":            -100.0,
+            "success":           200.0,
         },
     }
 

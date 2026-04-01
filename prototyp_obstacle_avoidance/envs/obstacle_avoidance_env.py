@@ -267,7 +267,8 @@ class ObstacleAvoidanceEnv:
         # Reward scaling: per-step rewards *= decision_dt (time-independent magnitude)
         per_step_rewards = {
             "time",
-            "obstacle_proximity" "distance",
+            "distance",
+            "obstacle_proximity",
             "distance_absolute",
             "distance_flat",
         }
@@ -347,11 +348,6 @@ class ObstacleAvoidanceEnv:
         )
         self.min_obstacle_dist = torch.zeros(
             (self.num_envs,), device=gs.device, dtype=gs.tc_float
-        )
-
-        # Hover counter
-        self.hover_counter = torch.zeros(
-            (self.num_envs,), device=gs.device, dtype=gs.tc_int
         )
 
         # Unstable buffer: once a drone becomes unstable in an episode,
@@ -603,6 +599,7 @@ class ObstacleAvoidanceEnv:
         # With high decimation, early random actions can cause extreme states mid-loop.
         # Kill motors for unstable envs to prevent NaN accelerations in the solver;
         # the post-loop crash check will reset them normally.
+        inside_target_all_substeps = torch.ones(self.num_envs, device=gs.device, dtype=torch.bool)
         for _ in range(self.decimation):
             rpms = self.controller.update(target_pos, target_yaw)
             curr_pos = self.drone.get_pos()
@@ -628,6 +625,10 @@ class ObstacleAvoidanceEnv:
                 )
             self.drone.set_propellels_rpm(rpms)
             self.scene.step()
+
+            # Track whether drone stays inside target area throughout decision step
+            substep_dist = torch.norm(self.target_pos - self.drone.get_pos(), dim=1)
+            inside_target_all_substeps &= (substep_dist < self.env_cfg["hover_radius"])
 
         # Update state
         self.episode_length_buf += 1
@@ -656,15 +657,6 @@ class ObstacleAvoidanceEnv:
         self.min_obstacle_dist = obs_dists.min(dim=1).values
         self.obstacle_collision = self.min_obstacle_dist < self.collision_radius
 
-        # Hover counter
-        close_enough = torch.norm(self.rel_pos, dim=1) < self.env_cfg["hover_radius"]
-        slow_enough = (
-            torch.norm(self.base_lin_vel, dim=1) < self.env_cfg["success_vel_threshold"]
-        )
-        near_target = close_enough & slow_enough
-        self.hover_counter[near_target] += 1
-        self.hover_counter[~near_target] = 0
-
         # Termination
         self.crash_condition = (
             (self.base_pos[:, 2] < 0.2)
@@ -673,7 +665,8 @@ class ObstacleAvoidanceEnv:
             | (torch.norm(self.rel_pos, dim=1) > 50.0)
             | self.obstacle_collision
         )
-        self.success_condition = self.hover_counter >= self.env_cfg["hover_steps"]
+        # Success: drone stayed within hover_radius for the entire decision step
+        self.success_condition = inside_target_all_substeps
         timeout_condition = self.episode_length_buf > self.max_episode_length
 
         self.reset_buf = (
@@ -779,7 +772,6 @@ class ObstacleAvoidanceEnv:
         self.last_actions[envs_idx] = 0.0
         self.episode_length_buf[envs_idx] = 0
         self.reset_buf[envs_idx] = True
-        self.hover_counter[envs_idx] = 0
         self.unstable_buf[envs_idx] = False
 
         # Clear depth history for reset envs (new episode, new obstacle layout)
@@ -867,16 +859,9 @@ class ObstacleAvoidanceEnv:
     # Reward functions
     # ------------------------------------------------------------------
 
-    # def _reward_distance(self):
-    #     """Delta distance: positive for moving closer, negative for moving away."""
-    #     prev_dist = torch.norm(self.last_rel_pos, dim=1)
-    #     curr_dist = torch.norm(self.rel_pos, dim=1)
-    #     return prev_dist - curr_dist
-
-    # def _reward_distance_absolute(self):
-    #     """Proximity reward: increasingly positive the closer the drone is to the target."""
-    #     # return 1.0 / (1.0 + torch.norm(self.rel_pos, dim=1))
-    #     return -torch.norm(self.rel_pos, dim=1)
+    def _reward_distance(self):
+        """Penalty proportional to distance from target."""
+        return torch.norm(self.rel_pos, dim=1)
 
     def _reward_distance_flat(self):
         """Flat bonus/penalty: +1 if drone moved closer to target, -1 if further."""
@@ -884,8 +869,8 @@ class ObstacleAvoidanceEnv:
         curr_dist = torch.norm(self.rel_pos, dim=1)
         return torch.sign(prev_dist - curr_dist)
 
-    # def _reward_time(self):
-    #     return torch.ones(self.num_envs, device=gs.device, dtype=gs.tc_float)
+    def _reward_time(self):
+        return torch.ones(self.num_envs, device=gs.device, dtype=gs.tc_float)
 
     def _reward_obstacle_proximity(self):
         """Penalty when within safety_radius of any obstacle.

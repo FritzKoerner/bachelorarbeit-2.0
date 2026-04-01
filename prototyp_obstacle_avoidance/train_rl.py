@@ -78,8 +78,9 @@ def get_train_cfg(exp_name, max_iterations):
 def get_cfgs():
     env_cfg = {
         "num_actions": 4,
-        "episode_length_s": 30.0,
-        "action_scales": [3.0, 3.0, 3.0],
+        "decimation": 100,             # PID runs at 100 Hz, RL decides every 100 steps (1 Hz)
+        "episode_length_s": 60.0,
+        "action_scales": [1.0, 1.0, 1.0],
         # Drone spawn
         "spawn_offset": 5.0,
         "spawn_height_min": 10.0,
@@ -91,10 +92,8 @@ def get_cfgs():
         # Curriculum (obstacle density only — target always uses configured ranges)
         "curriculum_steps": 3000,
         "curriculum_n_obstacles": 5,   # sparse random obstacles during curriculum
-        # Success
+        # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,
-        "success_vel_threshold": 0.3,
-        "hover_steps": 30,
         # Obstacles
         "num_obstacles": 8,
         "obstacle_size": [1.0, 1.0, 2.0],
@@ -148,12 +147,11 @@ def get_cfgs():
 
     reward_cfg = {
         "reward_scales": {
-            "distance":            -5.0,
-            "time":                -0.5,
-            "obstacle_proximity": -30.0,
-            "crash":             -100.0,
-            "obstacle_collision": -150.0,
-            "success":            200.0,
+            "distance":           -5.0,
+            "time":               -0.5,
+            "obstacle_proximity": -6.0,
+            "crash":            -100.0,
+            "success":           200.0,
         },
     }
 
