@@ -85,13 +85,13 @@ def get_cfgs():
         "spawn_offset": 5.0,
         "spawn_height_min": 10.0,
         "spawn_height_max": 10.0,
-        # Target
-        "target_x_range": [3.0, 3.0],
-        "target_y_range": [3.0, 3.0],
+        # Target (randomized across 10×10m area)
+        "target_x_range": [-5.0, 5.0],
+        "target_y_range": [-5.0, 5.0],
         "target_z_range": [1.0, 1.0],
-        # Curriculum (obstacle density only — target always uses configured ranges)
+        # Obstacle curriculum: no obstacles for first N steps, then strategic placement
         "curriculum_steps": 3000,
-        "curriculum_n_obstacles": 5,   # sparse random obstacles during curriculum
+        "curriculum_n_obstacles": 5,
         # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,
         # Obstacles

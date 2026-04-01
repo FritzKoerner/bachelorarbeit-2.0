@@ -740,15 +740,15 @@ class ObstacleAvoidanceEnv:
         oz_val = self.obstacle_size[2] / 2.0  # half-height so base sits on ground
 
         if self.global_step < curriculum_steps:
-            # Curriculum: no obstacles (learn navigation first)
-            # Move entities underground so depth camera sees clear space too
+            # Phase 1: no obstacles — learn full-distance navigation first
+            # Move entities underground so depth camera sees clear space
             underground = torch.zeros((n, 3), device=gs.device, dtype=gs.tc_float)
             underground[:, 2] = -100.0
             for i, obs_entity in enumerate(self.obstacles):
                 obs_entity.set_pos(underground, envs_idx=envs_idx, zero_velocity=True)
                 self.obstacle_positions[envs_idx, i] = underground
         else:
-            # Post-curriculum: strategic placement with guaranteed blocker
+            # Phase 2: strategic obstacle placement with guaranteed path blocker
             self._place_obstacles_strategic(envs_idx, spawn_pos, n, oz_val)
 
         # Set drone state
