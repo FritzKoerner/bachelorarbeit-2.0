@@ -78,7 +78,7 @@ def get_train_cfg(exp_name, max_iterations):
 def get_cfgs():
     env_cfg = {
         "num_actions": 4,
-        "decimation": 100,             # PID runs at 100 Hz, RL decides every 100 steps (1 Hz)
+        "decimation": 300,             # PID runs at 100 Hz, RL decides every 300 steps (3 s)
         "episode_length_s": 60.0,
         "action_scales": [1.0, 1.0, 1.0],
         # Drone spawn

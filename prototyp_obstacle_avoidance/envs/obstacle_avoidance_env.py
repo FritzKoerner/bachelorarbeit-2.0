@@ -269,7 +269,6 @@ class ObstacleAvoidanceEnv:
             "time",
             "distance",
             "obstacle_proximity",
-            "distance_absolute",
             "distance_flat",
         }
         for name in self.reward_scales:
@@ -715,24 +714,15 @@ class ObstacleAvoidanceEnv:
         self.target_pos[envs_idx] = torch.stack([tx, ty, tz], dim=-1)
 
         # Randomize drone spawn
-        spawn_curriculum_steps = self.env_cfg.get("spawn_curriculum_steps", 0)
-        if spawn_curriculum_steps > 0 and self.global_step < spawn_curriculum_steps:
-            # Early curriculum: spawn ~1m above the target so the agent
-            # learns hovering and landing before long-range navigation.
-            spawn_r = self.env_cfg.get("spawn_curriculum_radius", 1.0)
-            sx = tx + gs_rand_float(-spawn_r, spawn_r, (n,), gs.device)
-            sy = ty + gs_rand_float(-spawn_r, spawn_r, (n,), gs.device)
-            sz = tz + gs_rand_float(0.5, spawn_r + 0.5, (n,), gs.device)  # always above
-        else:
-            offset = self.env_cfg["spawn_offset"]
-            sx = gs_rand_float(-offset, offset, (n,), gs.device)
-            sy = gs_rand_float(-offset, offset, (n,), gs.device)
-            sz = gs_rand_float(
-                self.env_cfg["spawn_height_min"],
-                self.env_cfg["spawn_height_max"],
-                (n,),
-                gs.device,
-            )
+        offset = self.env_cfg["spawn_offset"]
+        sx = gs_rand_float(-offset, offset, (n,), gs.device)
+        sy = gs_rand_float(-offset, offset, (n,), gs.device)
+        sz = gs_rand_float(
+            self.env_cfg["spawn_height_min"],
+            self.env_cfg["spawn_height_max"],
+            (n,),
+            gs.device,
+        )
         spawn_pos = torch.stack([sx, sy, sz], dim=-1)
 
         # Randomize obstacles (curriculum controls density only)

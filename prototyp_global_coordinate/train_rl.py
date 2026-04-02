@@ -65,7 +65,7 @@ def get_train_cfg(exp_name, max_iterations):
 def get_cfgs():
     env_cfg = {
         "num_actions": 4,
-        "decimation": 100,            # PID runs at 100 Hz, RL decides every 1 s
+        "decimation": 300,            # PID runs at 100 Hz, RL decides every 3 s
         "episode_length_s": 60.0,
         # Action scaling: maps [-1,1] → offset from current drone position (metres).
         "action_scales": [1.0, 1.0, 1.0],

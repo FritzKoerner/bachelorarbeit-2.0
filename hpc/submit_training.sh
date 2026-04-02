@@ -56,6 +56,21 @@ case "${proto_choice:-1}" in
     *) PROTOTYPE="global_coordinate" ;;
 esac
 
+# ╔══════════════════════════════════════╗
+# ║  1b. Action space                    ║
+# ╚══════════════════════════════════════╝
+section "Action Space"
+echo -e "   ${WHITE}1)${RESET} continuous       (4D float in [-1,1])"
+echo -e "   ${WHITE}2)${RESET} discrete         (4x3 ternary: stay/neg/pos per axis)"
+echo -e "   ${WHITE}3)${RESET} simple-discrete  (1-of-9: fwd/bwd/l/r/up/dn/yaw/halt)"
+printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
+read -r action_choice
+case "${action_choice:-1}" in
+    2) ACTION_SPACE="discrete" ;;
+    3) ACTION_SPACE="simple-discrete" ;;
+    *) ACTION_SPACE="continuous" ;;
+esac
+
 # --- Per-prototype defaults ---
 case "$PROTOTYPE" in
     obstacle_avoidance)
@@ -68,6 +83,9 @@ case "$PROTOTYPE" in
         ;;
 esac
 DEF_EXP_NAME="genesis-${PROTOTYPE}"
+if [ "$ACTION_SPACE" != "continuous" ]; then
+    DEF_EXP_NAME="${DEF_EXP_NAME}-${ACTION_SPACE}"
+fi
 
 # ╔══════════════════════════════════════╗
 # ║  2. Experiment name                  ║
@@ -132,9 +150,14 @@ PROTO_DIR="${GENESIS_DIR}/prototyp_${PROTOTYPE}"
 LOG_DIR="${GENESIS_DIR}/logs"
 
 # Pick training script
-TRAIN_SCRIPT="train_rl.py"
-if [ "$USE_WANDB" = "true" ] && [ -f "${PROTO_DIR}/train_rl_wb.py" ]; then
+if [ "$ACTION_SPACE" = "simple-discrete" ]; then
+    TRAIN_SCRIPT="train_rl_simple_discrete_wb.py"
+elif [ "$ACTION_SPACE" = "discrete" ]; then
+    TRAIN_SCRIPT="train_rl_discrete_wb.py"
+elif [ "$USE_WANDB" = "true" ] && [ -f "${PROTO_DIR}/train_rl_wb.py" ]; then
     TRAIN_SCRIPT="train_rl_wb.py"
+else
+    TRAIN_SCRIPT="train_rl.py"
 fi
 
 # Build training command args
@@ -147,6 +170,7 @@ JOB_NAME="${EXP_NAME}"
 
 section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
+info "Action space" "$ACTION_SPACE"
 info "Experiment" "$EXP_NAME"
 info "Script" "$TRAIN_SCRIPT"
 info "Command" "python ${TRAIN_SCRIPT} ${TRAIN_ARGS}"

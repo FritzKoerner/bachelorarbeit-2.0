@@ -69,9 +69,9 @@ def get_train_cfg(exp_name, max_iterations):
                     "output_channels": [32, 64, 128],
                     "kernel_size": [8, 4, 3],
                     "stride": [4, 2, 1],
-                    "norm": "none",
+                    "norm": "batch",
                     "activation": "elu",
-                    "global_pool": "avg",
+                    "global_pool": "max",
                     "flatten": True,
                 },
             },
@@ -98,7 +98,7 @@ def get_cfgs():
     env_cfg = DictConfig({
         "num_actions": 4,
         "episode_length_s": 60.0,
-        "decimation": 100,             # PID runs at 100 Hz, RL decides every 100 steps (1 Hz)
+        "decimation": 300,             # PID runs at 100 Hz, RL decides every 300 steps (3 s)
         "action_scales": [1.0, 1.0, 1.0],
         # Drone spawn
         "spawn_offset": 5.0,
@@ -108,11 +108,8 @@ def get_cfgs():
         "target_x_range": [-5.0, 5.0],
         "target_y_range": [-5.0, 5.0],
         "target_z_range": [1.0, 1.0],
-        # Spawn curriculum: disabled — full distance from the start
-        "spawn_curriculum_steps": 0,
-        "spawn_curriculum_radius": 1.0,
         # Obstacle curriculum: no obstacles for first N steps, then strategic placement
-        "curriculum_steps": 3840000,
+        "curriculum_steps": 37500,  # 7500 iters × 5 steps_per_env
         "curriculum_n_obstacles": 5,
         # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,
