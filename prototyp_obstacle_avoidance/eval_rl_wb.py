@@ -16,6 +16,7 @@ import wandb
 from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 from envs.obstacle_avoidance_env import ObstacleAvoidanceEnv
+from envs.obstacle_avoidance_env_v2 import ObstacleAvoidanceEnvV2
 from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl
 
 
@@ -333,7 +334,10 @@ def main():
         num_envs    = args.num_envs
         show_viewer = False
 
-    env = ObstacleAvoidanceEnv(
+    # Select env class based on reward keys saved in cfgs.pkl
+    is_v2 = "progress" in reward_cfg.get("reward_scales", {})
+    EnvClass = ObstacleAvoidanceEnvV2 if is_v2 else ObstacleAvoidanceEnv
+    env = EnvClass(
         num_envs=num_envs,
         env_cfg=env_cfg,
         obs_cfg=obs_cfg,

@@ -9,6 +9,7 @@ from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 
 from envs.coordinate_landing_env import CoordinateLandingEnv
+from envs.coordinate_landing_env_v2 import CoordinateLandingEnvV2
 
 
 class DictConfig(dict):
@@ -25,12 +26,12 @@ class DictConfig(dict):
 def get_train_cfg(exp_name, max_iterations):
     return {
         # Runner-level
-        "num_steps_per_env": 5,
+        "num_steps_per_env": 20,
         "save_interval": 100,
 
         # ── W&B logging ──────────────────────────────────────────────
         "logger": "wandb",
-        "wandb_project": "drone-landing",
+        "wandb_project": "drone-continuous",
         # Optional: set WANDB_USERNAME env var for team/entity routing
         # ─────────────────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ def get_train_cfg(exp_name, max_iterations):
     }
 
 
-def get_cfgs():
+def get_cfgs(env_v2=False):
     env_cfg = DictConfig({
         "num_actions": 4,
         "decimation": 300,            # PID runs at 100 Hz, RL decides every 3 s
@@ -136,14 +137,24 @@ def get_cfgs():
         },
     }
 
-    reward_cfg = {
-        "reward_scales": {
-            "distance":  -5.0,
-            "time":     -0.5,
-            "crash":   -100.0,
-            "success":  200.0,
-        },
-    }
+    if env_v2:
+        reward_cfg = {
+            "reward_scales": {
+                "progress":  5.0,
+                "close":     1.0,
+                "crash":   -100.0,
+                "success":  200.0,
+            },
+        }
+    else:
+        reward_cfg = {
+            "reward_scales": {
+                "distance":  -5.0,
+                "time":     -0.5,
+                "crash":   -100.0,
+                "success":  200.0,
+            },
+        }
 
     return env_cfg, obs_cfg, reward_cfg
 
@@ -154,13 +165,16 @@ def main():
     parser.add_argument("-v", "--vis", action="store_true", default=False)
     parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=401)
+    parser.add_argument("--env-v2", action="store_true", help="Use V2 env (progress+close rewards)")
     args = parser.parse_args()
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning", performance_mode=True)
 
     log_dir = f"logs/{args.exp_name}"
-    env_cfg, obs_cfg, reward_cfg = get_cfgs()
+    env_cfg, obs_cfg, reward_cfg = get_cfgs(env_v2=args.env_v2)
     train_cfg = get_train_cfg(args.exp_name, args.max_iterations)
+    if args.env_v2:
+        train_cfg["wandb_project"] = "drone-continuous-v2"
 
     if os.path.exists(log_dir):
         shutil.rmtree(log_dir)
@@ -174,7 +188,8 @@ def main():
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    env = CoordinateLandingEnv(
+    EnvClass = CoordinateLandingEnvV2 if args.env_v2 else CoordinateLandingEnv
+    env = EnvClass(
         num_envs=args.num_envs,
         env_cfg=env_cfg,
         obs_cfg=obs_cfg,

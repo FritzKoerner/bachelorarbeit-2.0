@@ -1,24 +1,19 @@
 """
-CoordinateLandingEnv: rsl-rl v5.x compatible drone environment for global-coordinate landing.
+CoordinateLandingEnvV2: reward-reworked variant of CoordinateLandingEnv.
 
-The RL agent outputs a target position (x, y, z) and yaw angle; a cascading PID
-controller tracks that target and outputs motor RPMs.  The environment learns to
-choose target coordinates that guide the drone to the landing site.
+Changes from v1:
+  - No dt-scaling of rewards.  Weights are fixed regardless of decimation.
+  - Delta-distance "progress" reward replaces absolute distance penalty.
+  - Exponential "close" reward for strong final-approach attraction.
+  - No time penalty (progress + close already discourage idling).
 
-Constructor signature (rsl-rl style):
-    env = CoordinateLandingEnv(num_envs, env_cfg, obs_cfg, reward_cfg, show_viewer)
-    gs.init(...)     # called ONCE outside this class
-    env.build()      # creates Genesis scene + PID controller + buffers
+Reward components:
+  progress  — positive when drone moves toward target (bounded by drone speed)
+  close     — exp(-dist): peaks at target, strong gradient within ~2 m
+  crash     — one-time penalty on crash
+  success   — one-time bonus on successful hover
 
-Observation: TensorDict({"policy": (n_envs, 17)})
-    rel_pos(3) + quat(4) + lin_vel(3) + ang_vel(3) + last_actions(4)
-
-Action: (n_envs, 4) float in [-1, 1]
-    [ax, ay, az, ayaw]
-    target_x   = current_x + ax * action_scales[0]
-    target_y   = current_y + ay * action_scales[1]
-    target_z   = current_z + az * action_scales[2]
-    target_yaw = ayaw * 180.0   # degrees
+Everything else (obs, actions, PID, reset, termination) is identical to v1.
 """
 
 import math
@@ -41,11 +36,11 @@ def gs_rand_float(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size=shape, device=device) + lower
 
 
-class CoordinateLandingEnv:
+class CoordinateLandingEnvV2:
     def __init__(self, num_envs: int, env_cfg: dict, obs_cfg: dict,
                  reward_cfg: dict, show_viewer: bool = False):
         self.num_envs = num_envs
-        self.num_obs = obs_cfg["num_obs"]           # 20
+        self.num_obs = obs_cfg["num_obs"]           # 17
         self.num_privileged_obs = None
         self.num_actions = env_cfg["num_actions"]   # 4
         self.device = gs.device
@@ -139,12 +134,8 @@ class CoordinateLandingEnv:
             device=gs.device,
         )
 
-        # Multiply per-step rewards by decision_dt so their magnitude is time-independent.
-        # Terminal rewards (crash) are one-time events and must NOT be scaled by dt.
-        per_step_rewards = {"distance", "time"}
-        for name in self.reward_scales:
-            if name in per_step_rewards:
-                self.reward_scales[name] *= self.decision_dt
+        # No dt-scaling: reward weights are used as-is from reward_cfg.
+        # This keeps reward magnitudes stable across different decimation values.
 
         self.reward_functions = {
             name: getattr(self, "_reward_" + name)
@@ -386,26 +377,26 @@ class CoordinateLandingEnv:
             self.episode_sums[key][envs_idx] = 0.0
 
         # Debug / monitoring metrics
-        ep_len = self.episode_length_buf[envs_idx].float().clamp(min=1)
-        mean_ep_len = ep_len.mean()
-        self.extras["episode"]["terminal_dist"] = torch.norm(
-            self.rel_pos[envs_idx], dim=1
-        ).mean().item()
-        self.extras["episode"]["action_saturation_rate"] = (
-            self.action_saturated_count[envs_idx].mean() / mean_ep_len
-        ).item()
-        self.extras["episode"]["obs_clip_rate"] = (
-            self.obs_clipped_count[envs_idx].mean() / mean_ep_len
-        ).item()
-        action_names = ["ax", "ay", "az", "ayaw"]
-        action_mean = self.action_sum[envs_idx] / mean_ep_len
-        for i, name in enumerate(action_names):
-            self.extras["episode"][f"action_mean_{name}"] = action_mean[:, i].mean().item()
+        # ep_len = self.episode_length_buf[envs_idx].float().clamp(min=1)
+        # mean_ep_len = ep_len.mean()
+        # self.extras["episode"]["terminal_dist"] = torch.norm(
+        #     self.rel_pos[envs_idx], dim=1
+        # ).mean().item()
+        # self.extras["episode"]["action_saturation_rate"] = (
+        #     self.action_saturated_count[envs_idx].mean() / mean_ep_len
+        # ).item()
+        # self.extras["episode"]["obs_clip_rate"] = (
+        #     self.obs_clipped_count[envs_idx].mean() / mean_ep_len
+        # ).item()
+        # action_names = ["ax", "ay", "az", "ayaw"]
+        # action_mean = self.action_sum[envs_idx] / mean_ep_len
+        # for i, name in enumerate(action_names):
+        #     self.extras["episode"][f"action_mean_{name}"] = action_mean[:, i].mean().item()
 
         # Reset accumulators
-        self.action_saturated_count[envs_idx] = 0.0
-        self.action_sum[envs_idx] = 0.0
-        self.obs_clipped_count[envs_idx] = 0.0
+        # self.action_saturated_count[envs_idx] = 0.0
+        # self.action_sum[envs_idx] = 0.0
+        # self.obs_clipped_count[envs_idx] = 0.0
 
     def reset(self):
         self.reset_buf[:] = True
@@ -423,8 +414,6 @@ class CoordinateLandingEnv:
         s = self.obs_scales
         return torch.cat(
             [
-                # torch.clip(self.base_pos    * s["pos"],        -1, 1),   # 3
-                # torch.clip(self.target_pos  * s["target_pos"], -5, 5),   # 3
                 torch.clip(self.rel_pos     * s["rel_pos"],    -1, 1),   # 3
                 self.base_quat,                                            # 4
                 torch.clip(self.base_lin_vel * s["lin_vel"],   -1, 1),   # 3
@@ -432,41 +421,31 @@ class CoordinateLandingEnv:
                 self.last_actions,                                         # 4
             ],
             dim=-1,
-        )  # total: 13
+        )  # total: 17
 
     # ------------------------------------------------------------------
     # Reward functions
     # ------------------------------------------------------------------
 
-    def _reward_distance(self):
-        """Penalty proportional to distance from target."""
-        return torch.norm(self.rel_pos, dim=1)
+    def _reward_progress(self):
+        """Reward for moving closer to target. Positive when approaching."""
+        prev_dist = torch.norm(self.last_rel_pos, dim=1)
+        curr_dist = torch.norm(self.rel_pos, dim=1)
+        return prev_dist - curr_dist
 
-    # def _reward_close(self):
-    #     """Dense positive reward that peaks at the target: exp(-dist).
-    #     Gives the agent an explicit gradient toward the goal at all distances."""
-    #     return torch.exp(-torch.norm(self.rel_pos, dim=1))
-
-    def _reward_time(self):
-        return torch.ones(self.num_envs, device=gs.device, dtype=gs.tc_float)
-
+    def _reward_close(self):
+        """Exponential reward that peaks at the target.
+        Gives strong gradient within ~2 m for precise final approach."""
+        return torch.exp(-torch.norm(self.rel_pos, dim=1))
 
     def _reward_crash(self):
         """Penalty on crash."""
         rew = torch.zeros(self.num_envs, device=gs.device, dtype=gs.tc_float)
         rew[self.crash_condition] = 1.0
         return rew
-    
+
     def _reward_success(self):
         """Reward on success."""
         rew = torch.zeros(self.num_envs, device=gs.device, dtype=gs.tc_float)
         rew[self.success_condition] = 1.0
         return rew
-
-    # def _reward_smooth(self):
-    #     """Penalty for jerky actions."""
-    #     return torch.sum(torch.square(self.actions - self.last_actions), dim=1)
-
-    # def _reward_yaw_rate(self):
-    #     """Penalty for spinning around the vertical axis."""
-    #     return torch.square(self.base_ang_vel[:, 2])

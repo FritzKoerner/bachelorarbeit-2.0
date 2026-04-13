@@ -15,8 +15,9 @@ import wandb
 
 from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
-from envs.coordinate_landing_env import CoordinateLandingEnv
-from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl
+from envs.coordinate_landing_simple_discrete_env import CoordinateLandingSimpleDiscreteEnv
+from train_rl_simple_discrete_wb import DictConfig  # needed to unpickle cfgs.pkl
+from modules.multi_categorical import MultiCategoricalDistribution  # needed to unpickle train_cfg
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +30,6 @@ def find_latest_checkpoint(log_dir: str) -> tuple[str, int]:
     files = glob.glob(pattern)
     if not files:
         raise FileNotFoundError(f"No checkpoints found in {log_dir}")
-    # Parse iteration number from filename
     def iter_num(path):
         m = re.search(r"model_(\d+)\.pt$", path)
         return int(m.group(1)) if m else -1
@@ -72,7 +72,7 @@ def resolve_hpc_log_dir(run_name):
 
 
 # ---------------------------------------------------------------------------
-# Episode collection  (identical to eval_rl.py)
+# Episode collection
 # ---------------------------------------------------------------------------
 
 def collect_episodes(env, policy, num_episodes: int) -> list[dict]:
@@ -250,19 +250,16 @@ def make_plots(results: list[dict]) -> plt.Figure:
 
 def log_to_wandb(results: list[dict], stats: dict, fig: plt.Figure, ckpt_iter: int) -> None:
     """Log per-episode data, summary stats, and plots to W&B."""
-    # Per-episode table
     table = wandb.Table(columns=["episode", "outcome", "length", "min_dist", "reward"])
     for i, r in enumerate(results):
         outcome = "success" if r["success"] else ("crash" if r["crash"] else "timeout")
         table.add_data(i, outcome, r["length"], r["min_dist"], r["reward"])
     wandb.log({"eval/episodes": table})
 
-    # Summary metrics
     for key, val in stats.items():
         wandb.summary[f"eval/{key}"] = val
     wandb.summary["eval/checkpoint"] = ckpt_iter
 
-    # Upload figure
     wandb.log({"eval/stats_plot": wandb.Image(fig)})
 
 
@@ -272,16 +269,16 @@ def log_to_wandb(results: list[dict], stats: dict, fig: plt.Figure, ckpt_iter: i
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--exp_name",   type=str, default="drone-landing")
+    parser.add_argument("-e", "--exp_name",   type=str, default="drone-landing-simple-discrete")
     parser.add_argument("--hpc",              nargs="?", const="list", default=None,
-                        help="HPC run name (e.g. 'new_version'). No value = list runs.")
+                        help="HPC run name (e.g. 'simple_discrete_02'). No value = list runs.")
     parser.add_argument("--log_dir",          type=str, default=None,
                         help="Direct path to log dir (overrides --exp_name)")
     parser.add_argument("--ckpt",             type=int, default=None,
                         help="Checkpoint iteration (default: latest)")
     parser.add_argument("--num_envs",         type=int, default=50)
     parser.add_argument("--num_episodes",     type=int, default=100)
-    parser.add_argument("--wandb_project",    type=str, default="drone-continuous")
+    parser.add_argument("--wandb_project",    type=str, default="drone-simple-discrete")
     parser.add_argument("--vis", action="store_true",
                         help="Viewer mode: 1 env, 10 episodes, no W&B logging")
     args = parser.parse_args()
@@ -319,7 +316,7 @@ def main():
         num_envs    = args.num_envs
         show_viewer = False
 
-    env = CoordinateLandingEnv(
+    env = CoordinateLandingSimpleDiscreteEnv(
         num_envs=num_envs,
         env_cfg=env_cfg,
         obs_cfg=obs_cfg,
@@ -333,7 +330,6 @@ def main():
     policy = runner.get_inference_policy(device=gs.device)
 
     if args.vis:
-        # Interactive viewer: run 10 episodes sequentially
         num_vis_episodes = 10
         max_steps = int(env_cfg["episode_length_s"] * 100)
         print(f"Viewer mode: running {num_vis_episodes} episodes (checkpoint {ckpt_iter})")
@@ -355,20 +351,16 @@ def main():
                     step = 0
         print("Done.")
     else:
-        # Collect episodes
         print(f"Collecting {args.num_episodes} episodes across {num_envs} parallel envs ...")
         results = collect_episodes(env, policy, args.num_episodes)
 
-        # Stats + plots
         stats = print_stats(results)
         fig = make_plots(results)
 
-        # Save plot locally
         plot_path = os.path.join(log_dir, "eval_stats.png")
         fig.savefig(plot_path, dpi=150, bbox_inches="tight")
         print(f"Plot saved -> {plot_path}")
 
-        # Log to W&B
         run_name = f"{args.exp_name}-eval-iter{ckpt_iter}"
         wandb.init(
             project=args.wandb_project,
@@ -394,24 +386,24 @@ if __name__ == "__main__":
 
 """
 # Evaluate latest checkpoint, log to W&B
-python eval_rl_wb.py
+python eval_rl_simple_discrete_wb.py
 
 # List available HPC runs
-python eval_rl_wb.py --hpc
+python eval_rl_simple_discrete_wb.py --hpc
 
 # Evaluate HPC run (latest checkpoint)
-python eval_rl_wb.py --hpc new_version
+python eval_rl_simple_discrete_wb.py --hpc simple_discrete_02
 
 # Evaluate HPC run (specific checkpoint)
-python eval_rl_wb.py --hpc new_version --ckpt 400
+python eval_rl_simple_discrete_wb.py --hpc simple_discrete_02 --ckpt 400
 
 # Evaluate specific checkpoint
-python eval_rl_wb.py --ckpt 300
+python eval_rl_simple_discrete_wb.py --ckpt 300
 
 # Custom episode count
-python eval_rl_wb.py --num_episodes 200 --num_envs 100
+python eval_rl_simple_discrete_wb.py --num_episodes 200 --num_envs 100
 
 # Visual viewer (1 env, 10 episodes, no W&B)
-python eval_rl_wb.py --vis
-python eval_rl_wb.py --ckpt 300 --vis
+python eval_rl_simple_discrete_wb.py --vis
+python eval_rl_simple_discrete_wb.py --ckpt 300 --vis
 """

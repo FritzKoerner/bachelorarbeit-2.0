@@ -43,36 +43,20 @@ python eval_rl_wb.py                                       # auto-finds latest c
 
 Conda environment: `ba_v04`. Key packages: `genesis-world==0.4.3` (installs `quadrants==0.4.4`), `torch>=2.0.0`, `numpy`, `scipy`, `pyyaml`, `tensorboard`, `wandb`, `rsl-rl-lib==5.0.1`, `tensordict`. Genesis v0.4.3 auto-installs `moviepy`, `opencv-python`, `mujoco` as deps.
 
-## Genesis API Notes (v0.4.3)
+## Genesis API Gotchas (v0.4.3)
 
-### Changes from v0.3.13
-
-- **`get_link("main_body")`** for URDF root link reference. v0.4.3's improved URDF parser no longer wraps root as "base" — use the actual URDF link name.
-- **Quadrants backend** (`quadrants==0.4.4`) replaces Taichi (GsTaichi). 30%+ faster collision, improved URDF parsing. Transparent to user code — `gs.init(backend=gs.gpu)` unchanged. Env variable prefix changed from `TI_` to `QD_` (e.g., `QD_NUM_THREADS`). Expect one-time JIT recompilation on first run (new kernel cache).
-- **ProximitySensor** (new in v0.4.3): `gs.sensors.Proximity` — measures closest mesh surface distance from probe points. Uses triangle-based queries O(probes × triangles × envs). Not beneficial for our box-obstacle avoidance — manual AABB checks are faster and simpler.
-- **Legacy URDF parser fallback** for `.dae` meshes — works but shows a warning.
-- **CoACD convex decomposition** runs automatically on first build (~60s for drone mesh, 60 convex hulls). Cached for subsequent runs.
-
-### Unchanged from v0.3.13
-
-- **`scene.add_camera()` blocked post-build** — bypass via `scene._visualizer.add_camera(res, pos, lookat, up, model, fov, aperture, focus_dist, GUI, spp, denoise, near, far, env_idx, debug)` + `cam.build()`
-- **Two-phase construction**: call `gs.init(backend=gs.gpu)` once, then `env.build()` — the env constructor does NOT build the scene. `scene.build()` triggers JIT compilation; must be called before stepping.
-- **No `camera.start()`/`stop()`** — call `camera.render()` directly
-- `camera.render(depth=True, segmentation=True)` returns a **tuple** `(rgb, depth, segmentation, normal)`, not a dict
-- **Typo in API**: `drone.set_propellels_rpm(rpms)` (propellels, not propellers)
-- Custom URDF drones need explicit `propellers_link_name` and `propellers_spin`
+- **`get_link("main_body")`** for URDF root link reference — use the actual URDF link name, not "base".
+- **Quadrants backend** (`quadrants==0.4.4`) replaces Taichi. Env variable prefix: `QD_` (not `TI_`). One-time JIT recompilation on first run.
+- **CoACD convex decomposition** runs automatically on first build (~60s for drone mesh). Cached for subsequent runs.
+- **Two-phase construction**: `gs.init(backend=gs.gpu)` once, then `env.build()`. `scene.build()` triggers JIT; must be called before stepping.
+- `camera.render(depth=True, segmentation=True)` returns a **tuple** `(rgb, depth, segmentation, normal)`, not a dict.
+- **Typo in API**: `drone.set_propellels_rpm(rpms)` (propellels, not propellers).
+- Custom URDF drones need explicit `propellers_link_name` and `propellers_spin`.
 - Conventions: right-handed Z-up, quaternions w-x-y-z, Euler angles in degrees (scipy extrinsic x-y-z), all state tensors `(n_envs, ...)` on `gs.device`.
-- **Auto-reset contaminates state**: when `step()` returns `done=True`, the env has already reset — `base_pos` reflects the new spawn, not the terminal position. Record positions BEFORE `step()` or break before reading post-done state.
-- **Batched camera tracking**: `trans_quat_to_T(pos, quat)` from `genesis.utils.geom` converts to `(n_envs, 4, 4)` transforms. Multiply by a fixed offset matrix for attached cameras: `camera.set_pose(transform=torch.matmul(link_T, offset_T))`. Downward-facing offset: `Rotation.from_euler('zyx', [-90, -90, 0], degrees=True)` + `T[2,3] = -0.1`.
+- **Auto-reset contaminates state**: when `step()` returns `done=True`, the env has already reset — `base_pos` reflects the new spawn, not the terminal position. Record positions BEFORE `step()`.
 - **`gs.morphs.Box` with `fixed=True`**: supports per-env `set_pos(new_pos, envs_idx=idx, zero_velocity=True)` for obstacle randomization. Use `collision=False` when handling collisions via distance checks.
-- **BatchRenderer requires Madrona Vulkan backend** — crashes with `abort()` on Volta and older GPUs (not a Python exception). Check `torch.cuda.get_device_capability() >= (7, 5)` before attempting. Turing+ required. Use Rasterizer with `env_separate_rigid=True` as fallback.
-- **Rasterizer does NOT support batched cameras** — `_is_batched=False`, rejects `set_pose(transform=(N,4,4))`. Use `env_separate_rigid=True` which renders all envs in one `render()` call, returning `(n_rendered_envs, H, W)` in local env coordinates.
-- **Rasterizer `env_separate_rigid` depth bug (confirmed v0.3.13 – v0.4.3)**: `depth[i]` for i>0 always shows env 0's rigid bodies, not env i's. Root cause: `glDrawElementsInstancedBaseInstance()` requires OpenGL 4.2; GPUs with only 4.1 (V100) silently render all envs' rigid bodies. Workaround: swap env 0's obstacle positions to match env_i via `set_pos(envs_idx=[0])` before each render, extract `depth[0]`. `set_pos()` updates Rasterizer visuals immediately — no `scene.step()` needed.
-- **Depth bug fix on `main` (post-v0.4.3)**: PR #2560 (March 17 2026, one day after v0.4.3 release) adds OpenGL 4.1 fallback. Also enables batched camera poses for Rasterizer. To use: `pip install genesis-world@git+https://github.com/Genesis-Embodied-AI/Genesis.git@main`. Would eliminate the obstacle-swap workaround in `_render_depth_rasterizer()`.
-- **v0.4.3 warning**: "Batched rendering via VisOptions.env_separate_rigid=True is only partially supported by Rasterizer" — cosmetic, the obstacle-swap workaround still works correctly.
-- **`scene.envs_offset`**: `(n_envs, 3)` numpy array of per-env world-space offsets after `scene.build()`. Camera `set_pose()` in Rasterizer uses local env coordinates, not world.
-- **Non-batched `camera.render(depth=True)`** returns numpy `(H, W)` arrays, not torch tensors. Wrap with `torch.as_tensor(depth, dtype=gs.tc_float, device=gs.device)`.
-- **Eval reward accumulation must use GPU tensors** — `env.step()` returns rewards on `gs.device`. Accumulator tensors (`ep_reward`) must be on the same device, not CPU.
+- **BatchRenderer** requires Turing+ GPU (compute capability >= 7.5). Crashes with `abort()` on Volta — check capability before use. Fallback: Rasterizer with `env_separate_rigid=True`.
+- **Rasterizer** does NOT support batched cameras. Use `env_separate_rigid=True` which renders all envs in one `render()` call. Known depth bug: `depth[i]` for i>0 shows env 0's rigid bodies — workaround in `_render_depth_rasterizer()` swaps env 0 positions per render.
 
 ## Architecture
 
@@ -81,7 +65,6 @@ The RL agent outputs a target position; a cascading PID controller (position->ve
 Key files in `prototyp_global_coordinate/`:
 - `envs/coordinate_landing_env.py` — rsl-rl compatible env (reset/step/reward)
 - `controllers/pid_controller.py` — CascadingPIDController
-- `config/training_config.yaml` — DEPRECATED, not used. All config is in `train_rl.py`
 
 ## rsl-rl Gotchas
 
@@ -109,24 +92,37 @@ Key files in `prototyp_global_coordinate/`:
 - Spawn: height 10m fixed, drone offset +/-5m
 - Target: `train_rl.py` uses fixed (3,3,1); `train_rl_wb.py` randomizes in 10x10m square at 1m height
 - Curriculum: `train_rl.py` uses 20000-step curriculum; `train_rl_wb.py` has no curriculum (performs better)
-- Success: hover within 0.3m of target at <0.3 m/s for 30 consecutive steps (0.3s)
+- Success: hover within 0.3m of target for the entire decision step (decimation substeps)
 - Crash: height < 0.2m, tilt > 60°, or distance from target > 50m
 - Rewards: distance penalty (-5.0), time penalty (-0.5), crash (-100), success (+200)
+
+## Curriculum Coupling
+
+`curriculum_steps` counts `env.step()` calls, not runner iterations. Formula: `curriculum_steps = target_iteration × num_steps_per_env`. Changing `num_steps_per_env` shifts the curriculum transition point.
+
+## V2 Env Pattern
+
+- `--env-v2` flag only supported on continuous action space training scripts (`train_rl_wb.py`). Discrete scripts don't accept it.
+- Adding a new env version: create `envs/*_v2.py`, update `train_rl_wb.py` (import, `get_cfgs(env_v2=)`, `--env-v2` flag, env class selection), update `eval_rl_wb.py` (detect from `cfgs.pkl` reward keys).
+- Both prototypes support `--env-v2` via their respective `train_rl_wb.py`.
 
 ## Running (prototyp_obstacle_avoidance)
 
 ```bash
 cd prototyp_obstacle_avoidance
 
-# PPO training (headless, 64 envs — depth rollouts use more memory)
-python train_rl.py -B 64 --max_iterations 401
+# PPO training with W&B (headless, 256 envs, v2 rewards)
+python train_rl_wb.py -B 256 --max_iterations 8001 --env-v2
+
+# PPO training (v1 rewards, no W&B)
+python train_rl.py -B 256 --max_iterations 8001
 
 # Smoke test with viewer
-python train_rl.py -B 4 -v --max_iterations 5
+python train_rl_wb.py -B 4 -v --max_iterations 5
 
 # Evaluation
-python eval_rl.py --ckpt 300
-python eval_rl.py --ckpt 300 --vis
+python eval_rl_wb.py                                        # auto-finds latest checkpoint
+python eval_rl_wb.py --vis                                  # single visual episode
 
 # Visualization
 python visualize_paths.py --ckpt 100 300 --no_render
@@ -134,6 +130,8 @@ python visualize_paths.py --ckpt 300 --video
 ```
 
 ## prototyp_obstacle_avoidance Architecture
+
+**Env Versions**: v1 (default) uses dt-scaled distance+time penalties. v2 (`--env-v2`) uses fixed-weight progress+close rewards (no dt-scaling), keeps obstacle_proximity unchanged. `eval_rl_wb.py` auto-detects v2 via `"progress" in reward_scales` from `cfgs.pkl`.
 
 Key files (mirrors `prototyp_global_coordinate/` structure):
 - `envs/obstacle_avoidance_env.py` — Env: obstacles + depth camera + TensorDict
@@ -148,7 +146,9 @@ Key files (mirrors `prototyp_global_coordinate/` structure):
 
 **Obstacles**: 8 `gs.morphs.Box(1x1x2m)`, distance-based collision (radius 0.3m), obstacle proximity penalty within safety radius (3.0m). Post-curriculum uses strategic placement with 1 guaranteed path blocker on the spawn->target line; curriculum phase uses sparse random placement.
 
-**Rewards**: distance (+5, delta: prev_dist − curr_dist), time (-0.5), obstacle_proximity (-6), crash (-100, includes obstacle collision), success (+200). Per-step rewards scaled by dt.
+**Rewards (v1)**: distance (+5, delta: prev_dist − curr_dist), time (-0.5), obstacle_proximity (-6), crash (-100, includes obstacle collision), success (+200). Per-step rewards scaled by dt.
+
+**Rewards (v2)**: progress (+5, delta-distance), close (+1, exp(-dist)), obstacle_proximity (-6), crash (-100), success (+200). No dt-scaling, no time penalty.
 
 ## Running on HPC (Leipzig cluster)
 
@@ -162,9 +162,8 @@ source ~/genesis_v04/hpc/setup_env.sh
 # On HPC: reload env in new session
 source ~/genesis_v04/hpc/setup_env.sh --load
 
-# Submit batch training
-./hpc/submit_training.sh global_coordinate --batch 4096 --iters 401
-./hpc/submit_training.sh obstacle_avoidance --batch 512 --iters 401
+# Submit batch training (interactive — prompts for prototype, action space, env version, etc.)
+./hpc/submit_training.sh
 
 # Pull results back
 ./hpc/sync_from_hpc.sh

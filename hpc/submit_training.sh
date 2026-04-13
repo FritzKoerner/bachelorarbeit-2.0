@@ -63,19 +63,35 @@ section "Action Space"
 echo -e "   ${WHITE}1)${RESET} continuous       (4D float in [-1,1])"
 echo -e "   ${WHITE}2)${RESET} discrete         (4x3 ternary: stay/neg/pos per axis)"
 echo -e "   ${WHITE}3)${RESET} simple-discrete  (1-of-9: fwd/bwd/l/r/up/dn/yaw/halt)"
+echo -e "   ${WHITE}4)${RESET} sb3-discrete     (SB3 PPO, 1-of-9 Discrete)"
 printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
 read -r action_choice
 case "${action_choice:-1}" in
     2) ACTION_SPACE="discrete" ;;
     3) ACTION_SPACE="simple-discrete" ;;
+    4) ACTION_SPACE="sb3-discrete" ;;
     *) ACTION_SPACE="continuous" ;;
+esac
+
+# ╔══════════════════════════════════════╗
+# ║  1c. Env version (global_coord only)║
+# ╚══════════════════════════════════════╝
+ENV_VERSION="v1"
+section "Env Version"
+echo -e "   ${WHITE}1)${RESET} v1  (distance + time penalties)"
+echo -e "   ${WHITE}2)${RESET} v2  (progress + close rewards, no dt-scaling)"
+printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
+read -r version_choice
+case "${version_choice:-1}" in
+    2) ENV_VERSION="v2" ;;
+    *) ENV_VERSION="v1" ;;
 esac
 
 # --- Per-prototype defaults ---
 case "$PROTOTYPE" in
     obstacle_avoidance)
-        DEF_BATCH=32
-        DEF_ITERS=15000
+        DEF_BATCH=256
+        DEF_ITERS=8001
         ;;
     *)
         DEF_BATCH=4096
@@ -85,6 +101,9 @@ esac
 DEF_EXP_NAME="genesis-${PROTOTYPE}"
 if [ "$ACTION_SPACE" != "continuous" ]; then
     DEF_EXP_NAME="${DEF_EXP_NAME}-${ACTION_SPACE}"
+fi
+if [ "$ENV_VERSION" = "v2" ]; then
+    DEF_EXP_NAME="${DEF_EXP_NAME}-v2"
 fi
 
 # ╔══════════════════════════════════════╗
@@ -150,7 +169,9 @@ PROTO_DIR="${GENESIS_DIR}/prototyp_${PROTOTYPE}"
 LOG_DIR="${GENESIS_DIR}/logs"
 
 # Pick training script
-if [ "$ACTION_SPACE" = "simple-discrete" ]; then
+if [ "$ACTION_SPACE" = "sb3-discrete" ]; then
+    TRAIN_SCRIPT="train_rl_sb3_discrete.py"
+elif [ "$ACTION_SPACE" = "simple-discrete" ]; then
     TRAIN_SCRIPT="train_rl_simple_discrete_wb.py"
 elif [ "$ACTION_SPACE" = "discrete" ]; then
     TRAIN_SCRIPT="train_rl_discrete_wb.py"
@@ -165,12 +186,20 @@ TRAIN_ARGS="-e ${EXP_NAME} -B ${BATCH} --max_iterations ${ITERS}"
 if [ "$SEED" != "0" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --seed ${SEED}"
 fi
+# SB3 script uses --wandb flag (rsl-rl scripts bake W&B in via train_rl_*_wb.py)
+if [ "$ACTION_SPACE" = "sb3-discrete" ] && [ "$USE_WANDB" = "true" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --wandb"
+fi
+if [ "$ENV_VERSION" = "v2" ] && [ "$ACTION_SPACE" = "continuous" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --env-v2"
+fi
 
 JOB_NAME="${EXP_NAME}"
 
 section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
 info "Action space" "$ACTION_SPACE"
+info "Env version" "$ENV_VERSION"
 info "Experiment" "$EXP_NAME"
 info "Script" "$TRAIN_SCRIPT"
 info "Command" "python ${TRAIN_SCRIPT} ${TRAIN_ARGS}"

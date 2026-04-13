@@ -9,6 +9,7 @@ from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 
 from envs.obstacle_avoidance_env import ObstacleAvoidanceEnv
+from envs.obstacle_avoidance_env_v2 import ObstacleAvoidanceEnvV2
 
 
 class DictConfig(dict):
@@ -25,8 +26,8 @@ class DictConfig(dict):
 def get_train_cfg(exp_name, max_iterations):
     return {
         # Runner-level
-        "num_steps_per_env": 5,  # short rollouts (5 decisions at 1 Hz = 5s)
-        "save_interval": 100,
+        "num_steps_per_env": 20,
+        "save_interval": 250,
         "max_iterations": max_iterations,
 
         # W&B logging
@@ -94,7 +95,7 @@ def get_train_cfg(exp_name, max_iterations):
     }
 
 
-def get_cfgs():
+def get_cfgs(env_v2=False):
     env_cfg = DictConfig({
         "num_actions": 4,
         "episode_length_s": 60.0,
@@ -109,7 +110,7 @@ def get_cfgs():
         "target_y_range": [-5.0, 5.0],
         "target_z_range": [1.0, 1.0],
         # Obstacle curriculum: no obstacles for first N steps, then strategic placement
-        "curriculum_steps": 37500,  # 7500 iters × 5 steps_per_env
+        "curriculum_steps": 80000,  # 4000 iters × 20 steps_per_env = 50% of 8001
         "curriculum_n_obstacles": 5,
         # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,
@@ -164,15 +165,26 @@ def get_cfgs():
         },
     }
 
-    reward_cfg = {
-        "reward_scales": {
-            "distance":           -5.0,
-            "time":               -0.5,
-            "obstacle_proximity": -6.0,
-            "crash":            -100.0,
-            "success":           200.0,
-        },
-    }
+    if env_v2:
+        reward_cfg = {
+            "reward_scales": {
+                "progress":           5.0,
+                "close":              1.0,
+                "obstacle_proximity": -6.0,
+                "crash":            -100.0,
+                "success":           200.0,
+            },
+        }
+    else:
+        reward_cfg = {
+            "reward_scales": {
+                "distance":           -5.0,
+                "time":               -0.5,
+                "obstacle_proximity": -6.0,
+                "crash":            -100.0,
+                "success":           200.0,
+            },
+        }
 
     return env_cfg, obs_cfg, reward_cfg
 
@@ -182,16 +194,19 @@ def main():
     parser.add_argument("-e", "--exp_name", type=str, default="obstacle-avoidance")
     parser.add_argument("-v", "--vis", action="store_true", default=False)
     parser.add_argument("-B", "--num_envs", type=int, default=256)
-    parser.add_argument("--max_iterations", type=int, default=401)
+    parser.add_argument("--max_iterations", type=int, default=8001)
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to checkpoint to resume from (e.g. logs/obstacle-avoidance/model_300.pt)")
+    parser.add_argument("--env-v2", action="store_true", help="Use V2 env (progress+close rewards, no dt-scaling)")
     args = parser.parse_args()
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning", performance_mode=True)
 
     log_dir = f"logs/{args.exp_name}"
-    env_cfg, obs_cfg, reward_cfg = get_cfgs()
+    env_cfg, obs_cfg, reward_cfg = get_cfgs(env_v2=args.env_v2)
     train_cfg = get_train_cfg(args.exp_name, args.max_iterations)
+    if args.env_v2:
+        train_cfg["wandb_project"] = "obstacle-avoidance-v2"
 
     if args.resume is None:
         if os.path.exists(log_dir):
@@ -206,7 +221,8 @@ def main():
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    env = ObstacleAvoidanceEnv(
+    EnvClass = ObstacleAvoidanceEnvV2 if args.env_v2 else ObstacleAvoidanceEnv
+    env = EnvClass(
         num_envs=args.num_envs,
         env_cfg=env_cfg,
         obs_cfg=obs_cfg,
@@ -226,8 +242,11 @@ if __name__ == "__main__":
     main()
 
 """
-# Training with W&B logging (headless, 64 envs)
-python train_rl_wb.py -B 64 --max_iterations 401
+# Training with W&B logging (headless, 256 envs)
+python train_rl_wb.py -B 256 --max_iterations 8001
+
+# V2 env (progress+close rewards, no dt-scaling)
+python train_rl_wb.py -B 256 --max_iterations 8001 --env-v2
 
 # Smoke test with viewer (4 envs, 5 iterations)
 python train_rl_wb.py -B 4 -v --max_iterations 5
