@@ -144,8 +144,8 @@ MEM="$REPLY"
 ask "CPUs" "8"
 CPUS="$REPLY"
 
-ask "Time limit (hours)" "1"
-HOURS="$REPLY"
+ask "Time limit (minutes)" "10"
+MINUTES="$REPLY"
 
 # ╔══════════════════════════════════════╗
 # ║  6. Build command                    ║
@@ -182,7 +182,7 @@ info "Partition" "$PARTITION"
 info "GPU" "${GPU_TYPE} x1"
 info "Memory" "$MEM"
 info "CPUs" "$CPUS"
-info "Time limit" "${HOURS}h"
+info "Time limit" "${MINUTES}min"
 
 echo ""
 printf "   ${BOLD}Submit this job?${RESET} ${CYAN}[Y/n]${RESET}: "
@@ -206,7 +206,7 @@ cat > "$JOBSCRIPT" << SLURM_EOF
 #SBATCH --gpus=${GPU_TYPE}:1
 #SBATCH --mem=${MEM}
 #SBATCH --cpus-per-task=${CPUS}
-#SBATCH --time=${HOURS}:00:00
+#SBATCH --time=00:${MINUTES}:00
 #SBATCH --output=${LOG_DIR}/slurm-%j.out
 #SBATCH --error=${LOG_DIR}/slurm-%j.err
 #SBATCH --mail-type=END,FAIL
