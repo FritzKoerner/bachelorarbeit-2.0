@@ -115,7 +115,7 @@ class ObstacleAvoidanceEnv:
     # Two-phase construction
     # ------------------------------------------------------------------
 
-    def build(self):
+    def build(self, pre_build_cameras=None):
         """Create Genesis scene with obstacles, depth camera, drone, PID, and buffers."""
         # Determine renderer: BatchRenderer (parallel Vulkan) or Rasterizer (per-env loop)
         cfg_val = self._use_batch_renderer_cfg
@@ -216,6 +216,13 @@ class ObstacleAvoidanceEnv:
                 propellers_spin=[1, -1, 1, -1],
             )
         )
+
+        # Extra cameras (e.g. recording camera) — must be added before scene.build()
+        # so the BatchRenderer allocates buffers for them.
+        self.extra_cameras = []
+        if pre_build_cameras:
+            for cam_cfg in pre_build_cameras:
+                self.extra_cameras.append(scene.add_camera(**cam_cfg))
 
         env_spacing = self.env_cfg.get("env_spacing", 40.0)
         scene.build(n_envs=self.num_envs, env_spacing=(env_spacing, env_spacing))
@@ -574,7 +581,7 @@ class ObstacleAvoidanceEnv:
     # rsl-rl interface
     # ------------------------------------------------------------------
 
-    def step(self, actions):
+    def step(self, actions, substep_callback=None):
         self.actions = torch.clip(actions, -1.0, 1.0)
 
         # Accumulate debug metrics
@@ -624,6 +631,8 @@ class ObstacleAvoidanceEnv:
                 )
             self.drone.set_propellels_rpm(rpms)
             self.scene.step()
+            if substep_callback is not None:
+                substep_callback()
 
             # Track whether drone stays inside target area throughout decision step
             substep_dist = torch.norm(self.target_pos - self.drone.get_pos(), dim=1)

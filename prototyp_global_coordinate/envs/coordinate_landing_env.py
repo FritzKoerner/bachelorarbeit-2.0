@@ -202,7 +202,7 @@ class CoordinateLandingEnv:
     # rsl-rl interface
     # ------------------------------------------------------------------
 
-    def step(self, actions):
+    def step(self, actions, substep_callback=None):
         self.actions = torch.clip(actions, -1.0, 1.0)
 
         # Accumulate debug metrics
@@ -252,6 +252,8 @@ class CoordinateLandingEnv:
                 )
             self.drone.set_propellels_rpm(rpms)
             self.scene.step()
+            if substep_callback is not None:
+                substep_callback()
 
             # Track whether drone stays inside target area throughout decision step
             substep_dist = torch.norm(self.target_pos - self.drone.get_pos(), dim=1)

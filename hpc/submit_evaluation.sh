@@ -108,20 +108,49 @@ ask "Iteration (empty=latest)" ""
 CKPT="$REPLY"
 
 # ╔══════════════════════════════════════╗
-# ║  4. Eval parameters                  ║
+# ║  4. Eval mode                        ║
 # ╚══════════════════════════════════════╝
-section "Eval Parameters"
-ask "Num envs" "50"
-NUM_ENVS="$REPLY"
-
-ask "Num episodes" "100"
-NUM_EPISODES="$REPLY"
-
-ask_yn "W&B logging" "Y"
-USE_WANDB="$REPLY"
+section "Eval Mode"
+echo -e "   ${WHITE}1)${RESET} Full evaluation (stats + W&B)"
+echo -e "   ${WHITE}2)${RESET} Record landing video only"
+echo -e "   ${WHITE}3)${RESET} Both"
+printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
+read -r mode_choice
+case "${mode_choice:-1}" in
+    2) EVAL_MODE="video" ;;
+    3) EVAL_MODE="both" ;;
+    *) EVAL_MODE="eval" ;;
+esac
 
 # ╔══════════════════════════════════════╗
-# ║  5. Cluster resources                ║
+# ║  5. Eval parameters                  ║
+# ╚══════════════════════════════════════╝
+# Full eval parameters (only when running eval)
+NUM_ENVS=""
+NUM_EPISODES=""
+USE_WANDB="false"
+if [ "$EVAL_MODE" != "video" ]; then
+    section "Eval Parameters"
+    ask "Num envs" "50"
+    NUM_ENVS="$REPLY"
+
+    ask "Num episodes" "100"
+    NUM_EPISODES="$REPLY"
+
+    ask_yn "W&B logging" "Y"
+    USE_WANDB="$REPLY"
+fi
+
+# Video parameters (only when recording video)
+VIDEO_SEED="42"
+if [ "$EVAL_MODE" != "eval" ]; then
+    section "Video Parameters"
+    ask "Seed" "42"
+    VIDEO_SEED="$REPLY"
+fi
+
+# ╔══════════════════════════════════════╗
+# ║  6. Cluster resources                ║
 # ╚══════════════════════════════════════╝
 section "Cluster Resources"
 echo -e "   ${DIM}Use the same partition as training to match the renderer!${RESET}"
@@ -148,35 +177,68 @@ ask "Time limit (minutes)" "10"
 MINUTES="$REPLY"
 
 # ╔══════════════════════════════════════╗
-# ║  6. Build command                    ║
+# ║  7. Build commands                   ║
 # ╚══════════════════════════════════════╝
 
-# Pick eval script
-EVAL_SCRIPT="eval_rl_wb.py"
-if [ "$USE_WANDB" = "false" ] && [ -f "${PROTO_DIR}/eval_rl.py" ]; then
-    EVAL_SCRIPT="eval_rl.py"
+# Eval command (if running eval)
+EVAL_CMD=""
+if [ "$EVAL_MODE" != "video" ]; then
+    EVAL_SCRIPT="eval_rl_wb.py"
+    if [ "$USE_WANDB" = "false" ] && [ -f "${PROTO_DIR}/eval_rl.py" ]; then
+        EVAL_SCRIPT="eval_rl.py"
+    fi
+    EVAL_ARGS="-e ${EXP_NAME} --num_envs ${NUM_ENVS} --num_episodes ${NUM_EPISODES}"
+    if [ -n "$CKPT" ]; then
+        EVAL_ARGS="${EVAL_ARGS} --ckpt ${CKPT}"
+    fi
+    EVAL_CMD="python ${EVAL_SCRIPT} ${EVAL_ARGS}"
 fi
 
-EVAL_ARGS="-e ${EXP_NAME} --num_envs ${NUM_ENVS} --num_episodes ${NUM_EPISODES}"
-if [ -n "$CKPT" ]; then
-    EVAL_ARGS="${EVAL_ARGS} --ckpt ${CKPT}"
+# Video command (if recording video)
+VIDEO_CMD=""
+if [ "$EVAL_MODE" != "eval" ]; then
+    VIDEO_ARGS="-e ${EXP_NAME} --seed ${VIDEO_SEED}"
+    if [ -n "$CKPT" ]; then
+        VIDEO_ARGS="${VIDEO_ARGS} --ckpt ${CKPT}"
+    fi
+    VIDEO_CMD="python record_landing.py ${VIDEO_ARGS}"
 fi
 
-JOB_NAME="${EXP_NAME}-eval"
+# Job name
+case "$EVAL_MODE" in
+    eval)  JOB_NAME="${EXP_NAME}-eval" ;;
+    video) JOB_NAME="${EXP_NAME}-video" ;;
+    both)  JOB_NAME="${EXP_NAME}-eval+video" ;;
+esac
 
 # ╔══════════════════════════════════════╗
-# ║  7. Confirmation                     ║
+# ║  8. Confirmation                     ║
 # ╚══════════════════════════════════════╝
 section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
 info "Experiment" "$EXP_NAME"
-info "Script" "$EVAL_SCRIPT"
-info "Command" "python ${EVAL_SCRIPT} ${EVAL_ARGS}"
-echo ""
 info "Checkpoint" "${CKPT:-latest}"
-info "Num envs" "$NUM_ENVS"
-info "Num episodes" "$NUM_EPISODES"
-info "W&B logging" "$([ "$USE_WANDB" = "true" ] && echo 'enabled' || echo 'disabled')"
+
+case "$EVAL_MODE" in
+    eval)  info "Mode" "Full evaluation" ;;
+    video) info "Mode" "Landing video only" ;;
+    both)  info "Mode" "Evaluation + landing video" ;;
+esac
+
+if [ "$EVAL_MODE" != "video" ]; then
+    echo ""
+    info "Eval script" "$EVAL_SCRIPT"
+    info "Eval command" "$EVAL_CMD"
+    info "Num envs" "$NUM_ENVS"
+    info "Num episodes" "$NUM_EPISODES"
+    info "W&B logging" "$([ "$USE_WANDB" = "true" ] && echo 'enabled' || echo 'disabled')"
+fi
+if [ "$EVAL_MODE" != "eval" ]; then
+    echo ""
+    info "Video command" "$VIDEO_CMD"
+    info "Video seed" "$VIDEO_SEED"
+fi
+
 echo ""
 info "Partition" "$PARTITION"
 info "GPU" "${GPU_TYPE} x1"
@@ -192,12 +254,28 @@ case "${confirm:-Y}" in
 esac
 
 # ╔══════════════════════════════════════╗
-# ║  8. Submit                           ║
+# ║  9. Submit                           ║
 # ╚══════════════════════════════════════╝
 section "Submitting" "$SYM_ROCKET"
 spin_run "Creating log directory..." mkdir -p "${LOG_DIR}"
 
 JOBSCRIPT=$(mktemp /tmp/genesis_eval_XXXXXX.sh)
+
+# Build the run block based on mode
+RUN_BLOCK=""
+if [ -n "$EVAL_CMD" ]; then
+    RUN_BLOCK="${RUN_BLOCK}
+echo \"--- Evaluation ---\"
+${EVAL_CMD}
+echo \"--- Evaluation complete ---\""
+fi
+if [ -n "$VIDEO_CMD" ]; then
+    RUN_BLOCK="${RUN_BLOCK}
+
+echo \"--- Recording landing video ---\"
+${VIDEO_CMD}
+echo \"--- Video recording complete ---\""
+fi
 
 cat > "$JOBSCRIPT" << SLURM_EOF
 #!/bin/bash
@@ -221,15 +299,14 @@ conda activate ba_v04
 # Pin Vulkan to NVIDIA ICD
 export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
 
-# --- Evaluation ---
+# --- Run ---
 cd ${PROTO_DIR}
-echo "=== Starting evaluation: \$(date) ==="
+echo "=== Starting: \$(date) ==="
 echo "Host: \$(hostname), GPU: \$(nvidia-smi --query-gpu=name --format=csv,noheader)"
-echo "Experiment: ${EXP_NAME}"
+echo "Experiment: ${EXP_NAME}, Mode: ${EVAL_MODE}"
+${RUN_BLOCK}
 
-python ${EVAL_SCRIPT} ${EVAL_ARGS}
-
-echo "=== Evaluation complete: \$(date) ==="
+echo "=== Done: \$(date) ==="
 SLURM_EOF
 
 cp "$JOBSCRIPT" "${LOG_DIR}/${JOB_NAME}.sh"
@@ -240,4 +317,9 @@ spin_run "Submitting to SLURM..." sbatch "${LOG_DIR}/${JOB_NAME}.sh"
 done_banner "Job submitted: ${JOB_NAME}"
 hint "Monitor with: squeue -u \$USER"
 hint "Logs: ${LOG_DIR}/slurm-<jobid>.out"
-hint "Results: ${PROTO_DIR}/logs/${EXP_NAME}/eval_stats.png"
+if [ "$EVAL_MODE" != "video" ]; then
+    hint "Eval results: ${PROTO_DIR}/logs/${EXP_NAME}/eval_stats.png"
+fi
+if [ "$EVAL_MODE" != "eval" ]; then
+    hint "Landing video: ${PROTO_DIR}/logs/${EXP_NAME}/landing_ckpt_${CKPT:-latest}.mp4"
+fi
