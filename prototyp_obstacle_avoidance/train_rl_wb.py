@@ -119,8 +119,6 @@ def get_cfgs(env_v2=False):
         # Obstacles
         "num_obstacles": 8,
         "obstacle_size": [1.0, 1.0, 2.0],
-        "obstacle_x_range": [-8.0, 12.0],
-        "obstacle_y_range": [-8.0, 12.0],
         "collision_radius": 0.3,
         "safety_radius": 3.0,
         # Post-curriculum placement strategy: "strategic" | "vineyard"

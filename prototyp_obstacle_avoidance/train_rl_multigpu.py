@@ -141,8 +141,6 @@ def get_cfgs():
         # Obstacles
         "num_obstacles": 8,
         "obstacle_size": [1.0, 1.0, 2.0],
-        "obstacle_x_range": [-8.0, 12.0],
-        "obstacle_y_range": [-8.0, 12.0],
         "collision_radius": 0.3,
         "safety_radius": 1.0,
         # Post-curriculum strategic placement

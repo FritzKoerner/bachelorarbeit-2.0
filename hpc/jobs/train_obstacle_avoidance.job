@@ -47,10 +47,10 @@ cd "$GENESIS_DIR/prototyp_obstacle_avoidance"
 echo "=== Job started: $(date) ==="
 echo "Host: $(hostname)"
 echo "GPU:  $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
-echo "Training: train_rl.py -B 512 --max_iterations 401"
+echo "Training: train_rl_wb.py -B 512 --max_iterations 401"
 echo ""
 
-python train_rl.py -B 512 --max_iterations 401
+python train_rl_wb.py -B 512 --max_iterations 401
 
 echo ""
 echo "=== Job complete: $(date) ==="

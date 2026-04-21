@@ -128,7 +128,6 @@ esac
 # Full eval parameters (only when running eval)
 NUM_ENVS=""
 NUM_EPISODES=""
-USE_WANDB="false"
 if [ "$EVAL_MODE" != "video" ]; then
     section "Eval Parameters"
     ask "Num envs" "50"
@@ -136,9 +135,6 @@ if [ "$EVAL_MODE" != "video" ]; then
 
     ask "Num episodes" "100"
     NUM_EPISODES="$REPLY"
-
-    ask_yn "W&B logging" "Y"
-    USE_WANDB="$REPLY"
 fi
 
 # Video parameters (only when recording video)
@@ -210,9 +206,6 @@ MINUTES="$REPLY"
 EVAL_CMD=""
 if [ "$EVAL_MODE" != "video" ]; then
     EVAL_SCRIPT="eval_rl_wb.py"
-    if [ "$USE_WANDB" = "false" ] && [ -f "${PROTO_DIR}/eval_rl.py" ]; then
-        EVAL_SCRIPT="eval_rl.py"
-    fi
     EVAL_ARGS="-e ${EXP_NAME} --num_envs ${NUM_ENVS} --num_episodes ${NUM_EPISODES}"
     if [ -n "$CKPT" ]; then
         EVAL_ARGS="${EVAL_ARGS} --ckpt ${CKPT}"
@@ -276,7 +269,6 @@ if [ "$EVAL_MODE" != "video" ]; then
     info "Eval command" "$EVAL_CMD"
     info "Num envs" "$NUM_ENVS"
     info "Num episodes" "$NUM_EPISODES"
-    info "W&B logging" "$([ "$USE_WANDB" = "true" ] && echo 'enabled' || echo 'disabled')"
 fi
 if [ "$EVAL_MODE" != "eval" ]; then
     echo ""

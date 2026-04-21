@@ -55,7 +55,7 @@ Running RL training on the Leipzig University HPC cluster (A30/V100 GPUs).
 # Once allocated:
 source ~/genesis_v04/hpc/setup_env.sh --load
 cd ~/genesis_v04/prototyp_global_coordinate
-python train_rl.py -B 4 --max_iterations 5
+python train_rl_wb.py -B 4 --max_iterations 5
 ```
 
 ### Batch Job (full training)
@@ -67,16 +67,16 @@ sbatch ~/genesis_v04/hpc/jobs/train_global_coord.job
 sbatch ~/genesis_v04/hpc/jobs/train_obstacle_avoidance.job
 ```
 
-**Option B: Submission wrapper** (configure from command line):
+**Option B: Interactive submission wrapper** (prompts for prototype, env version, batch size, partition, etc.):
 ```bash
-# Global coordinate — full training on clara (V100)
-./hpc/submit_training.sh global_coordinate --batch 4096 --iters 401
+ssh hpc
+~/genesis_v04/hpc/submit_training.sh
 
-# Obstacle avoidance — on paula with A30
-./hpc/submit_training.sh obstacle_avoidance --partition paula --gpu-type a30 --batch 512
+# Continue an existing run from the latest (or chosen) checkpoint
+~/genesis_v04/hpc/continue_training.sh
 
-# Quick test run
-./hpc/submit_training.sh global_coordinate --hours 1 --batch 64 --iters 5
+# Submit an evaluation / landing-video job for a trained checkpoint
+~/genesis_v04/hpc/submit_evaluation.sh
 ```
 
 ## Monitoring

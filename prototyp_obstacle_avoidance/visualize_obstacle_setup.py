@@ -11,7 +11,7 @@ import matplotlib.patches as patches
 
 np.random.seed(42)
 
-# --- Config (from train_rl.py) ---
+# --- Config (from train_rl_wb.py) ---
 TARGET = np.array([3.0, 3.0, 1.0])
 SPAWN_OFFSET = 5.0
 SPAWN_HEIGHT = 10.0

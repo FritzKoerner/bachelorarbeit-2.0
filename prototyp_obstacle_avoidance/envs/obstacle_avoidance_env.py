@@ -108,7 +108,7 @@ class ObstacleAvoidanceEnv:
         self.depth_res = obs_cfg.get("depth_res", 64)
         self.render_interval = env_cfg.get("render_interval", 2)
         self.max_depth = env_cfg.get("max_depth", 20.0)
-        self.depth_stack_size = obs_cfg.get("depth_stack_size", 3)
+        self.depth_stack_size = obs_cfg.get("depth_stack_size", 1)
         self._use_batch_renderer_cfg = env_cfg.get("use_batch_renderer", "auto")
         self.obstacle_half_extents = torch.tensor(
             [s / 2.0 for s in self.obstacle_size], device=gs.device
@@ -391,27 +391,6 @@ class ObstacleAvoidanceEnv:
     # ------------------------------------------------------------------
     # Obstacle placement strategies
     # ------------------------------------------------------------------
-
-    def _place_obstacles_random(self, envs_idx, spawn_pos, n, oz_val):
-        """Curriculum phase: sparse random obstacles in a wide area."""
-        ox_range = self.env_cfg.get("obstacle_x_range", [-8.0, 12.0])
-        oy_range = self.env_cfg.get("obstacle_y_range", [-8.0, 12.0])
-        curriculum_n = self.env_cfg.get("curriculum_n_obstacles", self.num_obstacles)
-
-        for i, obs_entity in enumerate(self.obstacles):
-            if i < curriculum_n:
-                new_x = gs_rand_float(*ox_range, (n,), gs.device)
-                new_y = gs_rand_float(*oy_range, (n,), gs.device)
-                new_z = torch.full((n,), oz_val, device=gs.device)
-            else:
-                # Move inactive obstacles underground
-                new_x = torch.zeros(n, device=gs.device)
-                new_y = torch.zeros(n, device=gs.device)
-                new_z = torch.full((n,), -100.0, device=gs.device)
-
-            new_pos = torch.stack([new_x, new_y, new_z], dim=-1)
-            obs_entity.set_pos(new_pos, envs_idx=envs_idx, zero_velocity=True)
-            self.obstacle_positions[envs_idx, i] = new_pos
 
     def _place_obstacles_strategic(self, envs_idx, spawn_pos, n, oz_val):
         """Post-curriculum: dense placement with guaranteed path blocker.

@@ -154,13 +154,11 @@ echo -e "   ${SYM_CHECK} Checkpoint: ${GREEN}model_${RESUME_ITER}.pt${RESET}"
 # ╚══════════════════════════════════════╝
 section "Run Configuration"
 
-# Try to auto-detect from cfgs.pkl using Python
+# Auto-detect env version from cfgs.pkl
 CFGS_FILE="${RUN_DIR}/cfgs.pkl"
-ACTION_SPACE=""
 ENV_VERSION="v1"
 
 if [ -f "$CFGS_FILE" ]; then
-    # Use Python to parse cfgs.pkl and extract metadata
     DETECT_RESULT=$(python3 -c "
 import pickle, types, sys
 
@@ -168,72 +166,24 @@ import pickle, types, sys
 class DictConfig(dict):
     def to_dict(self): return dict(self)
 
-for mod_name in ['train_rl_wb', 'train_rl_discrete_wb', 'train_rl_simple_discrete_wb']:
-    mod = types.ModuleType(mod_name)
-    mod.DictConfig = DictConfig
-    sys.modules[mod_name] = mod
+mod = types.ModuleType('train_rl_wb')
+mod.DictConfig = DictConfig
+sys.modules['train_rl_wb'] = mod
 
 try:
     cfgs = pickle.load(open('$CFGS_FILE', 'rb'))
     env_cfg, obs_cfg, reward_cfg, train_cfg = cfgs
-
-    # Detect env version from reward keys
     scales = reward_cfg.get('reward_scales', {})
-    env_ver = 'v2' if 'progress' in scales else 'v1'
+    print('v2' if 'progress' in scales else 'v1')
+except Exception:
+    print('v1')
+" 2>/dev/null || echo "v1")
 
-    # Detect action space from wandb_project or experiment name
-    project = train_cfg.get('wandb_project', '')
-    exp = train_cfg.get('experiment_name', '')
-    combined = project + ' ' + exp
-    if 'simple-discrete' in combined or 'simple_discrete' in combined:
-        action = 'simple-discrete'
-    elif 'discrete' in combined:
-        action = 'discrete'
-    else:
-        action = 'continuous'
-
-    print(f'{action}|{env_ver}')
-except Exception as e:
-    print(f'error|{e}', file=sys.stderr)
-    print('|')
-" 2>/dev/null || echo "|")
-
-    IFS='|' read -r DETECTED_ACTION DETECTED_ENV <<< "$DETECT_RESULT"
-    if [ -n "$DETECTED_ACTION" ]; then
-        ACTION_SPACE="$DETECTED_ACTION"
-    fi
-    if [ -n "$DETECTED_ENV" ]; then
-        ENV_VERSION="$DETECTED_ENV"
+    if [ -n "$DETECT_RESULT" ]; then
+        ENV_VERSION="$DETECT_RESULT"
     fi
 fi
 
-# If auto-detection failed, ask the user
-if [ -z "$ACTION_SPACE" ]; then
-    warn "Could not auto-detect action space from cfgs.pkl"
-    echo -e "   ${WHITE}1)${RESET} continuous       (4D float in [-1,1])"
-    echo -e "   ${WHITE}2)${RESET} discrete         (4x3 ternary: stay/neg/pos per axis)"
-    echo -e "   ${WHITE}3)${RESET} simple-discrete  (1-of-9: fwd/bwd/l/r/up/dn/yaw/halt)"
-    printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
-    read -r action_choice
-    case "${action_choice:-1}" in
-        2) ACTION_SPACE="discrete" ;;
-        3) ACTION_SPACE="simple-discrete" ;;
-        *) ACTION_SPACE="continuous" ;;
-    esac
-    # Also ask env version for continuous
-    if [ "$ACTION_SPACE" = "continuous" ]; then
-        echo -e "   ${WHITE}1)${RESET} v1  (distance + time penalties)"
-        echo -e "   ${WHITE}2)${RESET} v2  (progress + close rewards, no dt-scaling)"
-        printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Env version"
-        read -r version_choice
-        case "${version_choice:-1}" in
-            2) ENV_VERSION="v2" ;;
-            *) ENV_VERSION="v1" ;;
-        esac
-    fi
-fi
-
-info "Action space" "$ACTION_SPACE"
 info "Env version" "$ENV_VERSION"
 
 # ╔══════════════════════════════════════╗
@@ -259,20 +209,18 @@ echo -e "   ${DIM}Will train ${ADDITIONAL} additional iterations (${RESUME_ITER}
 ask "Batch size" "256"
 BATCH="$REPLY"
 
-# Adaptive LR + learning rate override (only wired into continuous train_rl_wb.py)
+# Adaptive LR + learning rate override
 ADAPTIVE_LR="false"
 DESIRED_KL=""
 LEARNING_RATE=""
-if [ "$ACTION_SPACE" = "continuous" ]; then
-    ask_yn "Adaptive LR (KL)" "n"
-    ADAPTIVE_LR="$REPLY"
-    if [ "$ADAPTIVE_LR" = "true" ]; then
-        ask "Desired KL" "0.02"
-        DESIRED_KL="$REPLY"
-    fi
-    ask "Learning rate" "0.0005"
-    LEARNING_RATE="$REPLY"
+ask_yn "Adaptive LR (KL)" "n"
+ADAPTIVE_LR="$REPLY"
+if [ "$ADAPTIVE_LR" = "true" ]; then
+    ask "Desired KL" "0.02"
+    DESIRED_KL="$REPLY"
 fi
+ask "Learning rate" "0.0005"
+LEARNING_RATE="$REPLY"
 
 # Optional rename: fork the experiment into a new log dir with copied checkpoints
 if [ "$ADAPTIVE_LR" = "true" ]; then
@@ -317,12 +265,7 @@ HOURS="$REPLY"
 # ║  6. Build command                    ║
 # ╚══════════════════════════════════════╝
 
-# Pick the right training script
-case "$ACTION_SPACE" in
-    simple-discrete) TRAIN_SCRIPT="train_rl_simple_discrete_wb.py" ;;
-    discrete)        TRAIN_SCRIPT="train_rl_discrete_wb.py" ;;
-    *)               TRAIN_SCRIPT="train_rl_wb.py" ;;
-esac
+TRAIN_SCRIPT="train_rl_wb.py"
 
 # Fork into a new experiment dir if renamed, otherwise continue in place.
 # Forking copies all model_*.pt from the source dir so eval/plotting has full
@@ -351,7 +294,7 @@ RESUME_PATH="logs/${EFFECTIVE_RUN_NAME}/model_${RESUME_ITER}.pt"
 
 # Build args
 TRAIN_ARGS="-e ${EFFECTIVE_RUN_NAME} -B ${BATCH} --max_iterations ${MAX_ITERS} --resume ${RESUME_PATH}"
-if [ "$ENV_VERSION" = "v2" ] && [ "$ACTION_SPACE" = "continuous" ]; then
+if [ "$ENV_VERSION" = "v2" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --env-v2"
 fi
 if [ "$ADAPTIVE_LR" = "true" ]; then
@@ -373,7 +316,6 @@ if [ "$EFFECTIVE_RUN_NAME" != "$RUN_NAME" ]; then
 fi
 info "Resume from" "iteration ${RESUME_ITER}"
 info "Train to" "iteration ${MAX_ITERS} (+${ADDITIONAL})"
-info "Action space" "$ACTION_SPACE"
 info "Env version" "$ENV_VERSION"
 if [ "$ADAPTIVE_LR" = "true" ]; then
     info "Adaptive LR" "enabled (desired_kl=${DESIRED_KL})"

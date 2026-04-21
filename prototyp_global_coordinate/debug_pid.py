@@ -255,7 +255,7 @@ def main():
 
     scene.build(n_envs=n_envs, env_spacing=(40.0, 40.0))
 
-    # PID controller — same params as train_rl.py
+    # PID controller — same params as train_rl_wb.py
     pid_params = {
         "base_rpm": 1789.2,
         "max_rpm": 2700.0,

@@ -57,24 +57,7 @@ case "${proto_choice:-1}" in
 esac
 
 # ╔══════════════════════════════════════╗
-# ║  1b. Action space                    ║
-# ╚══════════════════════════════════════╝
-section "Action Space"
-echo -e "   ${WHITE}1)${RESET} continuous       (4D float in [-1,1])"
-echo -e "   ${WHITE}2)${RESET} discrete         (4x3 ternary: stay/neg/pos per axis)"
-echo -e "   ${WHITE}3)${RESET} simple-discrete  (1-of-9: fwd/bwd/l/r/up/dn/yaw/halt)"
-echo -e "   ${WHITE}4)${RESET} sb3-discrete     (SB3 PPO, 1-of-9 Discrete)"
-printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
-read -r action_choice
-case "${action_choice:-1}" in
-    2) ACTION_SPACE="discrete" ;;
-    3) ACTION_SPACE="simple-discrete" ;;
-    4) ACTION_SPACE="sb3-discrete" ;;
-    *) ACTION_SPACE="continuous" ;;
-esac
-
-# ╔══════════════════════════════════════╗
-# ║  1c. Env version (global_coord only)║
+# ║  1b. Env version                     ║
 # ╚══════════════════════════════════════╝
 ENV_VERSION="v1"
 section "Env Version"
@@ -99,9 +82,6 @@ case "$PROTOTYPE" in
         ;;
 esac
 DEF_EXP_NAME="genesis-${PROTOTYPE}"
-if [ "$ACTION_SPACE" != "continuous" ]; then
-    DEF_EXP_NAME="${DEF_EXP_NAME}-${ACTION_SPACE}"
-fi
 if [ "$ENV_VERSION" = "v2" ]; then
     DEF_EXP_NAME="${DEF_EXP_NAME}-v2"
 fi
@@ -126,13 +106,10 @@ ITERS="$REPLY"
 ask "Seed" "0"
 SEED="$REPLY"
 
-ask_yn "W&B logging" "Y"
-USE_WANDB="$REPLY"
-
 # Adaptive LR only supported by obstacle_avoidance/train_rl_wb.py currently
 ADAPTIVE_LR="false"
 DESIRED_KL="0.01"
-if [ "$PROTOTYPE" = "obstacle_avoidance" ] && [ "$ACTION_SPACE" = "continuous" ] && [ "$USE_WANDB" = "true" ]; then
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
     ask_yn "Adaptive LR" "n"
     ADAPTIVE_LR="$REPLY"
     if [ "$ADAPTIVE_LR" = "true" ]; then
@@ -180,29 +157,14 @@ GENESIS_DIR="$HOME/genesis_v04"
 PROTO_DIR="${GENESIS_DIR}/prototyp_${PROTOTYPE}"
 LOG_DIR="${GENESIS_DIR}/logs"
 
-# Pick training script
-if [ "$ACTION_SPACE" = "sb3-discrete" ]; then
-    TRAIN_SCRIPT="train_rl_sb3_discrete.py"
-elif [ "$ACTION_SPACE" = "simple-discrete" ]; then
-    TRAIN_SCRIPT="train_rl_simple_discrete_wb.py"
-elif [ "$ACTION_SPACE" = "discrete" ]; then
-    TRAIN_SCRIPT="train_rl_discrete_wb.py"
-elif [ "$USE_WANDB" = "true" ] && [ -f "${PROTO_DIR}/train_rl_wb.py" ]; then
-    TRAIN_SCRIPT="train_rl_wb.py"
-else
-    TRAIN_SCRIPT="train_rl.py"
-fi
+TRAIN_SCRIPT="train_rl_wb.py"
 
 # Build training command args
 TRAIN_ARGS="-e ${EXP_NAME} -B ${BATCH} --max_iterations ${ITERS}"
 if [ "$SEED" != "0" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --seed ${SEED}"
 fi
-# SB3 script uses --wandb flag (rsl-rl scripts bake W&B in via train_rl_*_wb.py)
-if [ "$ACTION_SPACE" = "sb3-discrete" ] && [ "$USE_WANDB" = "true" ]; then
-    TRAIN_ARGS="${TRAIN_ARGS} --wandb"
-fi
-if [ "$ENV_VERSION" = "v2" ] && [ "$ACTION_SPACE" = "continuous" ]; then
+if [ "$ENV_VERSION" = "v2" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --env-v2"
 fi
 if [ "$ADAPTIVE_LR" = "true" ]; then
@@ -213,7 +175,6 @@ JOB_NAME="${EXP_NAME}"
 
 section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
-info "Action space" "$ACTION_SPACE"
 info "Env version" "$ENV_VERSION"
 info "Experiment" "$EXP_NAME"
 info "Script" "$TRAIN_SCRIPT"
@@ -228,7 +189,6 @@ echo ""
 info "Batch size" "$BATCH envs"
 info "Iterations" "$ITERS"
 info "Seed" "$SEED"
-info "W&B logging" "$([ "$USE_WANDB" = "true" ] && echo 'enabled' || echo 'disabled')"
 if [ "$ADAPTIVE_LR" = "true" ]; then
     info "LR schedule" "adaptive (KL target ${DESIRED_KL})"
 else

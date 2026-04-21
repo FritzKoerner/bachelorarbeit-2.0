@@ -72,7 +72,7 @@ def resolve_hpc_log_dir(run_name):
 
 
 # ---------------------------------------------------------------------------
-# Episode collection  (identical to eval_rl.py)
+# Episode collection
 # ---------------------------------------------------------------------------
 
 def collect_episodes(env, policy, num_episodes: int) -> list[dict]:

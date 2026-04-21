@@ -19,7 +19,7 @@ from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 
 from envs.obstacle_avoidance_env import ObstacleAvoidanceEnv
-from train_rl import get_cfgs, get_train_cfg
+from train_rl_wb import get_cfgs, get_train_cfg
 
 
 def save_depth_heatmaps(depth_buf, obstacle_positions, base_pos, target_pos, step, out_dir):

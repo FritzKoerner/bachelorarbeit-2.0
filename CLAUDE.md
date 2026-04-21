@@ -20,23 +20,19 @@ Each prototype is self-contained with its own `envs/`, `controllers/`, etc.
 ```bash
 cd prototyp_global_coordinate
 
-# PPO training (rsl-rl, headless, 4096 envs)
-python train_rl.py -B 4096 --max_iterations 401
+# PPO training (rsl-rl + W&B, headless, 4096 envs)
+python train_rl_wb.py -B 4096 --max_iterations 401
 
 # PPO smoke test with viewer
-python train_rl.py -B 4 -v --max_iterations 5
+python train_rl_wb.py -B 4 -v --max_iterations 5
 
-# Evaluation
-python eval_rl.py      # PPO
+# Evaluation (auto-finds latest checkpoint)
+python eval_rl_wb.py
 
 # Visualization
 python visualize_paths.py --ckpt 100 300                  # matplotlib + screenshots
 python visualize_paths.py --ckpt 300 --video              # + landing GIF with trail
 python visualize_paths.py --ckpt 100 300 --no_render      # matplotlib only
-
-# W&B variants (same behavior, logs to Weights & Biases)
-python train_rl_wb.py -B 4096 --max_iterations 401
-python eval_rl_wb.py                                       # auto-finds latest checkpoint
 ```
 
 ## Dependencies
@@ -90,8 +86,7 @@ Key files in `prototyp_global_coordinate/`:
 
 - Drone: custom "draugas" URDF (mass 0.714kg, thrust2weight 2.25), base hover RPM 1789.2, max RPM 2700
 - Spawn: height 10m fixed, drone offset +/-5m
-- Target: `train_rl.py` uses fixed (3,3,1); `train_rl_wb.py` randomizes in 10x10m square at 1m height
-- Curriculum: `train_rl.py` uses 20000-step curriculum; `train_rl_wb.py` has no curriculum (performs better)
+- Target: `train_rl_wb.py` randomizes in 10x10m square at 1m height
 - Success: hover within 0.3m of target for the entire decision step (decimation substeps)
 - Crash: height < 0.2m, tilt > 60°, or distance from target > 50m
 - Rewards: distance penalty (-5.0), time penalty (-0.5), crash (-100), success (+200)
@@ -102,7 +97,6 @@ Key files in `prototyp_global_coordinate/`:
 
 ## V2 Env Pattern
 
-- `--env-v2` flag only supported on continuous action space training scripts (`train_rl_wb.py`). Discrete scripts don't accept it.
 - Adding a new env version: create `envs/*_v2.py`, update `train_rl_wb.py` (import, `get_cfgs(env_v2=)`, `--env-v2` flag, env class selection), update `eval_rl_wb.py` (detect from `cfgs.pkl` reward keys).
 - Both prototypes support `--env-v2` via their respective `train_rl_wb.py`.
 
@@ -114,8 +108,8 @@ cd prototyp_obstacle_avoidance
 # PPO training with W&B (headless, 256 envs, v2 rewards)
 python train_rl_wb.py -B 256 --max_iterations 8001 --env-v2
 
-# PPO training (v1 rewards, no W&B)
-python train_rl.py -B 256 --max_iterations 8001
+# PPO training (v1 rewards)
+python train_rl_wb.py -B 256 --max_iterations 8001
 
 # Smoke test with viewer
 python train_rl_wb.py -B 4 -v --max_iterations 5
@@ -162,7 +156,7 @@ source ~/genesis_v04/hpc/setup_env.sh
 # On HPC: reload env in new session
 source ~/genesis_v04/hpc/setup_env.sh --load
 
-# Submit batch training (interactive — prompts for prototype, action space, env version, etc.)
+# Submit batch training (interactive — prompts for prototype, env version, batch size, etc.)
 ./hpc/submit_training.sh
 
 # Pull results back
