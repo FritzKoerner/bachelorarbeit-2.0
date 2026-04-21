@@ -4,9 +4,17 @@
 Runs headless (no viewer, no W&B). Output: a single MP4 file you can scp back.
 Obstacles and target sphere are visible in the video.
 
-Captures frames at physics-step resolution (not decision-step) for smooth video,
-using a substep_callback inside env.step(). The recording camera is registered
-pre-build so it works with both BatchRenderer and Rasterizer.
+Two-pass, two-scene design:
+  Pass 1: run the policy in the real env (BatchRenderer + depth@64x64, unchanged)
+          and record per-substep drone pose into a plain trajectory struct.
+  Pass 2: tear down the inference scene, then build a minimal viz-only scene
+          with just a 960x540 recording camera (no depth camera), and replay
+          the trajectory via drone.set_pos/set_quat each substep.
+
+Why two scenes? BatchRenderer requires all cameras in a scene to share the
+same resolution. A 64x64 depth cam (required for the policy) cannot coexist
+with a 960x540 video cam in one scene. Option B preserves exact training
+observations while allowing a high-res video.
 
 Usage:
     python record_landing.py --hpc my_run              # latest checkpoint
@@ -17,6 +25,7 @@ Usage:
 
 import argparse
 import copy
+import gc
 import math
 import os
 import pickle
@@ -30,61 +39,64 @@ from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 from envs.obstacle_avoidance_env import ObstacleAvoidanceEnv
 from envs.obstacle_avoidance_env_v2 import ObstacleAvoidanceEnvV2
-from eval_rl_wb import find_latest_checkpoint, resolve_hpc_log_dir
+from eval_rl_wb import find_latest_checkpoint, resolve_hpc_log_dir, apply_placement_override
 from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl
 from visualize_paths import _build_path_mesh
 
 
 # ---------------------------------------------------------------------------
-# Video recording (two-pass: dry run for framing, replay for capture)
+# Pass 1 -- run policy in the real env and record trajectory
 # ---------------------------------------------------------------------------
 
-def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
-                   log_dir, ckpt, seed=42, render_every=1, res=(960, 540)):
-    """Record one landing episode and save as MP4.
+def _pass1_record_trajectory(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
+                             log_dir, ckpt, seed, no_obstacles=False):
+    """Run one episode with the policy; return a plain-data trajectory record.
 
-    Pass 1 runs the full episode to determine the trajectory and compute
-    optimal camera framing.  Pass 2 replays with the same seed, capturing
-    a frame every ``render_every`` physics substeps via substep_callback.
-
-    Returns (out_path, outcome, final_dist, num_frames).
+    The inference env is unchanged from training -- same BatchRenderer, same
+    64x64 depth camera, same attach()-based positioning. No recording camera
+    is added here, so the resolution-uniformity constraint is trivially
+    satisfied.
     """
     cfg = copy.deepcopy(env_cfg)
     cfg["visualize_target"] = True
-    cfg["curriculum_steps"] = 0
-
-    # Recording camera at dummy position — repositioned after dry run.
-    # Added via pre_build_cameras so BatchRenderer allocates buffers for it.
-    rec_cam_cfg = dict(
-        res=res, pos=(0, 0, 30), lookat=(0, 0, 0), fov=90, GUI=False,
-    )
+    # Default: strategic obstacles. --no-obstacles parks them underground (Phase 1).
+    cfg["curriculum_steps"] = float("inf") if no_obstacles else 0
 
     render_env = EnvClass(
         num_envs=1, env_cfg=cfg, obs_cfg=obs_cfg,
         reward_cfg=copy.deepcopy(reward_cfg), show_viewer=False,
     )
-    render_env.build(pre_build_cameras=[rec_cam_cfg])
-    rec_cam = render_env.extra_cameras[0]
+    render_env.build()
 
     runner = OnPolicyRunner(render_env, copy.deepcopy(train_cfg), log_dir,
                             device=gs.device)
     runner.load(os.path.join(log_dir, f"model_{ckpt}.pt"))
     policy = runner.get_inference_policy(device=gs.device)
 
-    max_steps = render_env.max_episode_length
-
-    # --- Pass 1: dry run to get full path for camera framing ---
     torch.manual_seed(seed)
     obs = render_env.reset()
-    start_pos = render_env.base_pos[0].cpu().numpy().copy()
-    target = render_env.target_pos[0].cpu().numpy().copy()
 
-    positions = [start_pos.copy()]
+    # Statics -- recorded once immediately after reset.
+    target_pos = render_env.target_pos[0].cpu().numpy().copy()
+    obstacle_positions = render_env.obstacle_positions[0].cpu().numpy().copy()
+    start_pos = render_env.drone.get_pos()[0].cpu().numpy().copy()
+    start_quat = render_env.drone.get_quat()[0].cpu().numpy().copy()
+
+    positions = [start_pos]
+    quaternions = [start_quat]
+
+    def record_substep():
+        positions.append(render_env.drone.get_pos()[0].cpu().numpy().copy())
+        quaternions.append(render_env.drone.get_quat()[0].cpu().numpy().copy())
+
     outcome = "timeout"
+    max_steps = render_env.max_episode_length
     with torch.no_grad():
         for _ in range(max_steps):
             actions = policy(obs)
-            obs, _, dones, _ = render_env.step(actions)
+            obs, _, dones, _ = render_env.step(
+                actions, substep_callback=record_substep,
+            )
             if dones[0]:
                 if render_env.success_condition[0].item():
                     outcome = "success"
@@ -93,81 +105,198 @@ def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
                 elif render_env.crash_condition[0].item():
                     outcome = "crash"
                 break
-            positions.append(render_env.base_pos[0].cpu().numpy().copy())
 
     positions = np.array(positions)
-    final_dist = float(np.linalg.norm(positions[-1] - target))
+    quaternions = np.array(quaternions)
+    final_dist = float(np.linalg.norm(positions[-1] - target_pos))
 
-    # Compute camera framing from full path + obstacle positions
-    obs_positions = render_env.obstacle_positions[0].cpu().numpy()
-    all_points = np.vstack([positions, target.reshape(1, 3), obs_positions])
+    record = dict(
+        positions=positions,
+        quaternions=quaternions,
+        obstacle_positions=obstacle_positions,
+        target_pos=target_pos,
+        obstacle_size=tuple(cfg.get("obstacle_size", [1.0, 1.0, 2.0])),
+        dt=render_env.dt,
+        outcome=outcome,
+        final_dist=final_dist,
+    )
+
+    # Tear down inference scene before returning. Callers still do a gc pass.
+    del policy
+    del runner
+    del render_env
+    return record
+
+
+# ---------------------------------------------------------------------------
+# Pass 2 -- replay trajectory in a viz-only scene with a single high-res cam
+# ---------------------------------------------------------------------------
+
+def _compute_camera_framing(positions, target_pos, obstacle_positions, fov=90):
+    """Frame the camera so the full trajectory + obstacles + target are visible."""
+    all_points = np.vstack([
+        positions, target_pos.reshape(1, 3), obstacle_positions,
+    ])
     bbox_min = all_points.min(axis=0)
     bbox_max = all_points.max(axis=0)
     center = (bbox_min + bbox_max) / 2.0
-    extent = np.linalg.norm(bbox_max - bbox_min)
+    extent = float(np.linalg.norm(bbox_max - bbox_min))
 
-    fov = 90
     padding = 1.4
     dist = (extent * padding) / (2.0 * math.tan(math.radians(fov / 2.0)))
     dist = max(dist, 2.0)
 
     cam_pos = (
-        center[0] + dist * 0.15,
-        center[1] - dist * 0.75,
-        center[2] + dist * 0.55,
+        float(center[0] + dist * 0.15),
+        float(center[1] - dist * 0.75),
+        float(center[2] + dist * 0.55),
     )
-    lookat = tuple(center)
+    lookat = tuple(float(c) for c in center)
+    return cam_pos, lookat
 
-    # Reposition recording camera to computed framing
-    rec_cam.set_pose(pos=cam_pos, lookat=lookat)
 
-    # --- Pass 2: replay with per-substep frame capture ---
-    torch.manual_seed(seed)
-    obs = render_env.reset()
-    ctx = render_env.scene.visualizer.context
+def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1):
+    """Build a minimal viz scene, replay the recorded trajectory, encode MP4.
 
+    No physics stepping, no policy, no PID. The drone is moved kinematically
+    each substep via set_pos/set_quat. Because there is only one camera, the
+    BatchRenderer uniform-resolution constraint does not apply -- renderer
+    choice is free. We use the Rasterizer (set_pos updates visuals directly).
+    """
+    positions = record["positions"]
+    quaternions = record["quaternions"]
+    obstacle_positions = record["obstacle_positions"]
+    target_pos = record["target_pos"]
+    ox, oy, oz = record["obstacle_size"]
+    dt = record["dt"]
+
+    fov = 90
+    cam_pos, lookat = _compute_camera_framing(
+        positions, target_pos, obstacle_positions, fov=fov,
+    )
+
+    # Minimal scene: no collision, no gravity -- we never step physics.
+    scene = gs.Scene(
+        sim_options=gs.options.SimOptions(dt=dt, substeps=1, gravity=(0, 0, 0)),
+        viewer_options=gs.options.ViewerOptions(max_FPS=60),
+        rigid_options=gs.options.RigidOptions(dt=dt, enable_collision=False),
+        vis_options=gs.options.VisOptions(
+            rendered_envs_idx=[0],
+            env_separate_rigid=True,
+        ),
+        show_viewer=False,
+    )
+
+    scene.add_entity(gs.morphs.Plane())
+
+    # Target sphere (pos set after build).
+    target_vis = scene.add_entity(
+        morph=gs.morphs.Mesh(
+            file="meshes/sphere.obj",
+            scale=0.15,
+            fixed=True,
+            collision=False,
+            batch_fixed_verts=True,
+        ),
+        surface=gs.surfaces.Rough(
+            diffuse_texture=gs.textures.ColorTexture(color=(1.0, 0.5, 0.5))
+        ),
+    )
+
+    # Obstacle boxes at recorded positions (static within episode).
+    obstacle_entities = []
+    for opos in obstacle_positions:
+        obs_entity = scene.add_entity(
+            morph=gs.morphs.Box(
+                size=(ox, oy, oz),
+                pos=(float(opos[0]), float(opos[1]), float(opos[2])),
+                fixed=True,
+                collision=False,
+            ),
+            surface=gs.surfaces.Rough(
+                diffuse_texture=gs.textures.ColorTexture(color=(0.8, 0.3, 0.2))
+            ),
+        )
+        obstacle_entities.append(obs_entity)
+
+    drone = scene.add_entity(
+        gs.morphs.Drone(
+            file="../assets/robots/draugas/draugas_genesis.urdf",
+            pos=(float(positions[0][0]), float(positions[0][1]), float(positions[0][2])),
+            euler=(0, 0, 0),
+            propellers_link_name=[
+                "prop0_link", "prop1_link", "prop2_link", "prop3_link",
+            ],
+            propellers_spin=[1, -1, 1, -1],
+        )
+    )
+
+    rec_cam = scene.add_camera(
+        res=res, pos=cam_pos, lookat=lookat, fov=fov, GUI=False,
+    )
+
+    scene.build(n_envs=1, env_spacing=(40.0, 40.0))
+
+    device = gs.device
+    env0 = torch.tensor([0], device=device)
+
+    # Pin target sphere at its recorded position.
+    target_vis.set_pos(
+        torch.tensor([target_pos], device=device, dtype=gs.tc_float),
+        envs_idx=env0, zero_velocity=True,
+    )
+
+    ctx = scene.visualizer.context
+
+    # Replay loop.
     frames = []
-    substep_count = [0]
-    trail_positions = [render_env.drone.get_pos()[0].cpu().numpy().copy()]
-    last_drawn_idx = [0]
-    trail_interval = max(1, 50 // render_every)  # draw trail every ~50 substeps
+    trail_positions = []
+    last_drawn_idx = 0
+    trail_interval = max(1, 50 // render_every)
 
-    def capture_substep():
-        substep_count[0] += 1
-        if substep_count[0] % render_every != 0:
-            return
+    n_frames = len(positions)
+    for t in range(n_frames):
+        # Skip frames per render_every, but always capture the last one.
+        if t % render_every != 0 and t != n_frames - 1:
+            continue
 
-        # Update trail periodically
-        pos = render_env.drone.get_pos()[0].cpu().numpy().copy()
-        trail_positions.append(pos)
+        drone.set_pos(
+            torch.tensor([positions[t]], device=device, dtype=gs.tc_float),
+            envs_idx=env0, zero_velocity=True,
+        )
+        drone.set_quat(
+            torch.tensor([quaternions[t]], device=device, dtype=gs.tc_float),
+            envs_idx=env0, zero_velocity=True,
+        )
+        # Articulated robots don't auto-sync to the rasterizer on set_pos
+        # alone -- mirrors the env's reset() trick at obstacle_avoidance_env_v2.py:808.
+        # With gravity=0 and zero RPM, physics is a no-op; the drone stays put.
+        scene.step()
+
+        # Incremental trail update.
+        trail_positions.append(positions[t])
         n = len(trail_positions)
-        if n > last_drawn_idx[0] + trail_interval:
-            new_pts = np.array(trail_positions[last_drawn_idx[0]:n])
+        if n > last_drawn_idx + trail_interval:
+            new_pts = np.array(trail_positions[last_drawn_idx:n])
             mesh = _build_path_mesh(
                 new_pts, radius=0.015, color=(0.0, 1.0, 0.0, 0.8),
             )
             if mesh is not None:
                 ctx.draw_debug_mesh(mesh)
-            last_drawn_idx[0] = n - 1
+            last_drawn_idx = n - 1
 
         rgb, _, _, _ = rec_cam.render()
         if isinstance(rgb, torch.Tensor):
             rgb = rgb.cpu().numpy()
+        # env_separate_rigid may return a batched (1, H, W, C) array.
+        if rgb.ndim == 4:
+            rgb = rgb[0]
         frames.append(rgb)
 
-    with torch.no_grad():
-        for step_i in range(max_steps):
-            actions = policy(obs)
-            obs, _, dones, _ = render_env.step(
-                actions, substep_callback=capture_substep,
-            )
-            if dones[0]:
-                break
-
-    # Draw final trail segment
+    # Final trail segment.
     n = len(trail_positions)
-    if n > last_drawn_idx[0] + 1:
-        new_pts = np.array(trail_positions[last_drawn_idx[0]:n])
+    if n > last_drawn_idx + 1:
+        new_pts = np.array(trail_positions[last_drawn_idx:n])
         mesh = _build_path_mesh(
             new_pts, radius=0.015, color=(0.0, 1.0, 0.0, 0.8),
         )
@@ -176,15 +305,13 @@ def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
 
     ctx.clear_debug_objects()
 
-    # Save as MP4
     if not frames:
-        print("No frames captured!")
-        return None, outcome, 0.0, 0
+        return 0
 
-    out_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}.mp4")
-    # Video FPS: real-time physics rate / render_every, capped at 50
-    physics_fps = 1.0 / render_env.dt
-    fps = min(50.0, max(10.0, physics_fps / render_every))
+    # Clamp raised to 120 so render_every=1 gives real-time 100 fps playback
+    # (dt=0.01 -> physics_fps=100). The old 50-cap made episodes play 2x slow.
+    physics_fps = 1.0 / dt
+    fps = min(120.0, max(10.0, physics_fps / render_every))
 
     h, w = frames[0].shape[:2]
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -193,7 +320,40 @@ def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
         writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
     writer.release()
 
-    return out_path, outcome, final_dist, len(frames)
+    return len(frames)
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator -- preserves the old record_landing() signature
+# ---------------------------------------------------------------------------
+
+def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
+                   log_dir, ckpt, seed=42, render_every=1, res=(1920, 1080),
+                   no_obstacles=False):
+    """Record one landing episode and save as MP4.
+
+    Pass 1 runs the policy in the real env to record the trajectory.
+    Pass 2 replays that trajectory in a minimal scene with only the video cam.
+
+    Returns (out_path, outcome, final_dist, num_frames).
+    """
+    record = _pass1_record_trajectory(
+        EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
+        log_dir, ckpt, seed, no_obstacles=no_obstacles,
+    )
+
+    # Force teardown of the inference scene before building the viz scene.
+    # Required so Madrona/Vulkan buffers from Pass 1 are released in time.
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    out_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}.mp4")
+    num_frames = _pass2_render_video(record, out_path, res=res,
+                                      render_every=render_every)
+    if num_frames == 0:
+        return None, record["outcome"], record["final_dist"], 0
+    return out_path, record["outcome"], record["final_dist"], num_frames
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +373,21 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--render-every", type=int, default=1,
                         help="Capture every Nth physics substep (default: 1 = all)")
+    parser.add_argument("--res", type=str, default="1920x1080",
+                        help="Video resolution WxH (default: 1920x1080)")
+    parser.add_argument("--no-obstacles", action="store_true",
+                        help="Hide all obstacles (curriculum Phase 1). Default is strategic placement.")
+    parser.add_argument("--placement", choices=["strategic", "vineyard"], default=None,
+                        help="Override placement strategy regardless of how the model was trained. "
+                             "Default: use whatever cfgs.pkl specifies.")
     args = parser.parse_args()
+
+    try:
+        w_str, h_str = args.res.lower().split("x")
+        res = (int(w_str), int(h_str))
+    except ValueError:
+        print(f"Invalid --res '{args.res}'; expected format WxH (e.g. 1920x1080)")
+        sys.exit(1)
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
 
@@ -248,13 +422,16 @@ def main():
     print(f"  Env        : {'v2' if is_v2 else 'v1'}")
     print(f"  Seed       : {args.seed}")
     print(f"  Render     : every {args.render_every} substep(s)")
+    print(f"  Resolution : {res[0]}x{res[1]}")
 
     # Eval overrides
     reward_cfg["reward_scales"] = {}
+    apply_placement_override(env_cfg, args.placement)
 
     result = record_landing(
         EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
         log_dir, ckpt_iter, seed=args.seed, render_every=args.render_every,
+        res=res, no_obstacles=args.no_obstacles,
     )
 
     if result[0] is None:

@@ -129,6 +129,18 @@ SEED="$REPLY"
 ask_yn "W&B logging" "Y"
 USE_WANDB="$REPLY"
 
+# Adaptive LR only supported by obstacle_avoidance/train_rl_wb.py currently
+ADAPTIVE_LR="false"
+DESIRED_KL="0.01"
+if [ "$PROTOTYPE" = "obstacle_avoidance" ] && [ "$ACTION_SPACE" = "continuous" ] && [ "$USE_WANDB" = "true" ]; then
+    ask_yn "Adaptive LR" "n"
+    ADAPTIVE_LR="$REPLY"
+    if [ "$ADAPTIVE_LR" = "true" ]; then
+        ask "Target KL" "0.01"
+        DESIRED_KL="$REPLY"
+    fi
+fi
+
 # ╔══════════════════════════════════════╗
 # ║  4. Cluster resources                ║
 # ╚══════════════════════════════════════╝
@@ -193,6 +205,9 @@ fi
 if [ "$ENV_VERSION" = "v2" ] && [ "$ACTION_SPACE" = "continuous" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --env-v2"
 fi
+if [ "$ADAPTIVE_LR" = "true" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --adaptive-lr --desired-kl ${DESIRED_KL}"
+fi
 
 JOB_NAME="${EXP_NAME}"
 
@@ -214,6 +229,11 @@ info "Batch size" "$BATCH envs"
 info "Iterations" "$ITERS"
 info "Seed" "$SEED"
 info "W&B logging" "$([ "$USE_WANDB" = "true" ] && echo 'enabled' || echo 'disabled')"
+if [ "$ADAPTIVE_LR" = "true" ]; then
+    info "LR schedule" "adaptive (KL target ${DESIRED_KL})"
+else
+    info "LR schedule" "fixed"
+fi
 
 echo ""
 printf "   ${BOLD}Submit this job?${RESET} ${CYAN}[Y/n]${RESET}: "

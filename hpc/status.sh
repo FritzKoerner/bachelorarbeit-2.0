@@ -19,7 +19,7 @@ SHOW_JOBS=false
 SHOW_PARTITIONS=false
 SHOW_GPUS=false
 WATCH_MODE=false
-WATCH_INTERVAL=30
+WATCH_INTERVAL=120
 
 # --- Parse arguments ---
 parse_args() {
@@ -47,7 +47,7 @@ parse_args() {
                 echo -e "    --gpus           Show GPU availability only"
                 echo ""
                 echo -e "  ${BOLD}Options:${RESET}"
-                echo -e "    -w, --watch [N]  Auto-refresh every N seconds (default: 30)"
+                echo -e "    -w, --watch [N]  Auto-refresh every N seconds (default: 120)"
                 echo -e "    -h, --help       Show this help"
                 echo ""
                 exit 0

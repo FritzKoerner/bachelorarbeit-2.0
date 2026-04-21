@@ -149,6 +149,32 @@ if [ "$EVAL_MODE" != "eval" ]; then
     VIDEO_SEED="$REPLY"
 fi
 
+# Obstacle toggle (only relevant for the obstacle_avoidance prototype)
+USE_OBSTACLES="true"
+PLACEMENT=""  # empty = inherit from cfgs.pkl
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    section "Obstacles"
+    echo -e "   ${DIM}Default: strategic placement (matches end-of-training distribution).${RESET}"
+    echo -e "   ${DIM}Disable to hide all obstacles (curriculum Phase 1) for navigation-only runs.${RESET}"
+    ask_yn "Enable obstacles" "Y"
+    USE_OBSTACLES="$REPLY"
+
+    if [ "$USE_OBSTACLES" = "true" ]; then
+        section "Placement Strategy"
+        echo -e "   ${DIM}Overrides whatever the checkpoint was trained with.${RESET}"
+        echo -e "   ${WHITE}1)${RESET} strategic  ${DIM}(corridor + ring around target)${RESET}"
+        echo -e "   ${WHITE}2)${RESET} vineyard   ${DIM}(parallel rows of tall boxes)${RESET}"
+        echo -e "   ${WHITE}3)${RESET} inherit    ${DIM}(use whatever cfgs.pkl specifies)${RESET}"
+        printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
+        read -r placement_choice
+        case "${placement_choice:-1}" in
+            2) PLACEMENT="vineyard" ;;
+            3) PLACEMENT="" ;;
+            *) PLACEMENT="strategic" ;;
+        esac
+    fi
+fi
+
 # ╔══════════════════════════════════════╗
 # ║  6. Cluster resources                ║
 # ╚══════════════════════════════════════╝
@@ -191,6 +217,12 @@ if [ "$EVAL_MODE" != "video" ]; then
     if [ -n "$CKPT" ]; then
         EVAL_ARGS="${EVAL_ARGS} --ckpt ${CKPT}"
     fi
+    if [ "$USE_OBSTACLES" = "false" ]; then
+        EVAL_ARGS="${EVAL_ARGS} --no-obstacles"
+    fi
+    if [ -n "$PLACEMENT" ]; then
+        EVAL_ARGS="${EVAL_ARGS} --placement ${PLACEMENT}"
+    fi
     EVAL_CMD="python ${EVAL_SCRIPT} ${EVAL_ARGS}"
 fi
 
@@ -200,6 +232,12 @@ if [ "$EVAL_MODE" != "eval" ]; then
     VIDEO_ARGS="-e ${EXP_NAME} --seed ${VIDEO_SEED}"
     if [ -n "$CKPT" ]; then
         VIDEO_ARGS="${VIDEO_ARGS} --ckpt ${CKPT}"
+    fi
+    if [ "$USE_OBSTACLES" = "false" ]; then
+        VIDEO_ARGS="${VIDEO_ARGS} --no-obstacles"
+    fi
+    if [ -n "$PLACEMENT" ]; then
+        VIDEO_ARGS="${VIDEO_ARGS} --placement ${PLACEMENT}"
     fi
     VIDEO_CMD="python record_landing.py ${VIDEO_ARGS}"
 fi
@@ -218,6 +256,13 @@ section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
 info "Experiment" "$EXP_NAME"
 info "Checkpoint" "${CKPT:-latest}"
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    if [ "$USE_OBSTACLES" = "true" ]; then
+        info "Obstacles" "${PLACEMENT:-inherit from cfgs.pkl}"
+    else
+        info "Obstacles" "hidden (navigation-only)"
+    fi
+fi
 
 case "$EVAL_MODE" in
     eval)  info "Mode" "Full evaluation" ;;

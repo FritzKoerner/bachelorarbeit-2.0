@@ -95,9 +95,14 @@ class ObstacleAvoidanceEnv:
 
         # Obstacle params
         self.num_obstacles = env_cfg.get("num_obstacles", 5)
-        self.obstacle_size = env_cfg.get("obstacle_size", [1.0, 1.0, 2.0])
+        self.obstacle_size = list(env_cfg.get("obstacle_size", [1.0, 1.0, 2.0]))
         self.collision_radius = env_cfg.get("collision_radius", 0.8)
         self.safety_radius = env_cfg.get("safety_radius", 3.0)
+        self.placement_strategy = env_cfg.get("placement_strategy", "strategic")
+        # Vineyard rows are tall (3 m default). Override z-size BEFORE the Box
+        # morph is built so every obstacle reflects the chosen height.
+        if self.placement_strategy == "vineyard":
+            self.obstacle_size[2] = env_cfg.get("vineyard_height", 3.0)
 
         # Depth camera params
         self.depth_res = obs_cfg.get("depth_res", 64)
@@ -472,6 +477,76 @@ class ObstacleAvoidanceEnv:
             self._set_obstacle(obs_idx, pos_xy, oz_val, n, envs_idx)
             obs_idx += 1
 
+    def _place_obstacles_vineyard(self, envs_idx, spawn_pos, n, oz_val):
+        """Vineyard-row placement: parallel rows with target in the aisle.
+
+        Rows are laid out symmetrically around the target's perpendicular
+        coordinate, which guarantees the target is never inside a row
+        (it always sits dead-centre of a centre aisle of width row_spacing).
+
+        - vineyard_n_rows rows, each running along a randomly chosen axis (X or Y)
+        - obstacles_per_row = num_obstacles // n_rows obstacles along each row
+        - row_spacing between adjacent rows (box->box perpendicular distance
+          is row_spacing - box_footprint)
+        - small jitter on each obstacle to avoid a perfectly synthetic grid
+        """
+        target = self.target_pos[envs_idx]  # (n, 3)
+
+        n_rows = self.env_cfg.get("vineyard_n_rows", 2)
+        obstacles_per_row = self.num_obstacles // n_rows
+        row_spacing = self.env_cfg.get("vineyard_row_spacing", 4.0)
+        within_row_spacing = self.env_cfg.get("vineyard_within_row_spacing", 2.0)
+        jitter = self.env_cfg.get("vineyard_jitter", 0.15)
+
+        # Row orientation per env: True = rows run along Y axis, False = along X
+        row_along_y = torch.rand(n, device=gs.device) < 0.5  # (n,) bool
+
+        # Perpendicular offsets, symmetric around 0 so target is always in an aisle
+        half = (n_rows - 1) / 2.0
+        row_offsets = (
+            torch.arange(n_rows, device=gs.device, dtype=gs.tc_float) - half
+        ) * row_spacing
+
+        # Within-row index offsets, centred on target along the row axis
+        center_k = (obstacles_per_row - 1) / 2.0
+
+        obs_idx = 0
+        for r in range(n_rows):
+            row_offset = row_offsets[r].item()
+            for k in range(obstacles_per_row):
+                if obs_idx >= self.num_obstacles:
+                    break
+                along = (k - center_k) * within_row_spacing
+
+                jit_a = gs_rand_float(-jitter, jitter, (n,), gs.device)  # along row
+                jit_p = gs_rand_float(-jitter, jitter, (n,), gs.device)  # perpendicular
+
+                # rows along Y: perp axis = X (row_offset on X, along on Y)
+                # rows along X: perp axis = Y (along on X, row_offset on Y)
+                pos_x = torch.where(
+                    row_along_y,
+                    target[:, 0] + row_offset + jit_p,
+                    target[:, 0] + along + jit_a,
+                )
+                pos_y = torch.where(
+                    row_along_y,
+                    target[:, 1] + along + jit_a,
+                    target[:, 1] + row_offset + jit_p,
+                )
+                pos_xy = torch.stack([pos_x, pos_y], dim=-1)
+                self._set_obstacle(obs_idx, pos_xy, oz_val, n, envs_idx)
+                obs_idx += 1
+
+        # Hide any leftover obstacles underground
+        while obs_idx < self.num_obstacles:
+            underground_pos = torch.zeros((n, 3), device=gs.device, dtype=gs.tc_float)
+            underground_pos[:, 2] = -100.0
+            self.obstacles[obs_idx].set_pos(
+                underground_pos, envs_idx=envs_idx, zero_velocity=True
+            )
+            self.obstacle_positions[envs_idx, obs_idx] = underground_pos
+            obs_idx += 1
+
     def _set_obstacle(self, idx, pos_xy, oz_val, n, envs_idx):
         """Helper: set obstacle position from XY coordinates."""
         new_pos = torch.stack(
@@ -747,8 +822,11 @@ class ObstacleAvoidanceEnv:
                 obs_entity.set_pos(underground, envs_idx=envs_idx, zero_velocity=True)
                 self.obstacle_positions[envs_idx, i] = underground
         else:
-            # Phase 2: strategic obstacle placement with guaranteed path blocker
-            self._place_obstacles_strategic(envs_idx, spawn_pos, n, oz_val)
+            # Phase 2: dispatch on chosen placement strategy
+            if self.placement_strategy == "vineyard":
+                self._place_obstacles_vineyard(envs_idx, spawn_pos, n, oz_val)
+            else:
+                self._place_obstacles_strategic(envs_idx, spawn_pos, n, oz_val)
 
         # Set drone state
         self.base_pos[envs_idx] = spawn_pos
@@ -792,9 +870,6 @@ class ObstacleAvoidanceEnv:
         # Debug / monitoring metrics
         ep_len = self.episode_length_buf[envs_idx].float().clamp(min=1)
         mean_ep_len = ep_len.mean()
-        self.extras["episode"]["terminal_dist"] = (
-            torch.norm(self.rel_pos[envs_idx], dim=1).mean().item()
-        )
         self.extras["episode"]["action_saturation_rate"] = (
             self.action_saturated_count[envs_idx].mean() / mean_ep_len
         ).item()

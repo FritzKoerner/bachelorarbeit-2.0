@@ -23,11 +23,13 @@ class DictConfig(dict):
         return dict(self)
 
 
-def get_train_cfg(exp_name, max_iterations):
+def get_train_cfg(exp_name, max_iterations, adaptive_lr=False, desired_kl=0.02, learning_rate=0.001):
+    schedule = "adaptive" if adaptive_lr else "fixed"
+    kl_target = desired_kl if adaptive_lr else None
     return {
         # Runner-level
         "num_steps_per_env": 20,
-        "save_interval": 250,
+        "save_interval": 100,
         "max_iterations": max_iterations,
 
         # W&B logging
@@ -39,15 +41,15 @@ def get_train_cfg(exp_name, max_iterations):
         "algorithm": {
             "class_name": "PPO",
             "clip_param": 0.2,
-            "desired_kl": None,
+            "desired_kl": kl_target,
             "entropy_coef": 0.001,
             "gamma": 0.99,
             "lam": 0.95,
-            "learning_rate": 0.001,
+            "learning_rate": learning_rate,
             "max_grad_norm": 1.0,
             "num_learning_epochs": 5,
             "num_mini_batches": 4,
-            "schedule": "fixed",
+            "schedule": schedule,
             "use_clipped_value_loss": True,
             "value_loss_coef": 1.0,
             "share_cnn_encoders": True,
@@ -81,7 +83,7 @@ def get_train_cfg(exp_name, max_iterations):
         # Critic (CNN shared from actor + separate MLP)
         "critic": {
             "class_name": "CNNModel",
-            "hidden_dims": [32, 32],
+            "hidden_dims": [64, 64, 64],
             "activation": "elu",
             "obs_normalization": True,
             # No cnn_cfg — PPO injects actor.cnns via share_cnn_encoders
@@ -110,7 +112,7 @@ def get_cfgs(env_v2=False):
         "target_y_range": [-5.0, 5.0],
         "target_z_range": [1.0, 1.0],
         # Obstacle curriculum: no obstacles for first N steps, then strategic placement
-        "curriculum_steps": 80000,  # 4000 iters × 20 steps_per_env = 50% of 8001
+        "curriculum_steps": 10000,  # 500 iters × 20 steps_per_env
         "curriculum_n_obstacles": 5,
         # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,
@@ -120,13 +122,21 @@ def get_cfgs(env_v2=False):
         "obstacle_x_range": [-8.0, 12.0],
         "obstacle_y_range": [-8.0, 12.0],
         "collision_radius": 0.3,
-        "safety_radius": 1.0,
+        "safety_radius": 3.0,
+        # Post-curriculum placement strategy: "strategic" | "vineyard"
+        "placement_strategy": "strategic",
         # Post-curriculum strategic placement
         "n_corridor_obstacles": 3,
         "n_ring_obstacles": 4,
         "ring_radius_range": [1.5, 3.5],
         "corridor_lateral_offset": 2.0,
         "post_curriculum_range": 5.0,
+        # Post-curriculum vineyard placement (3 m-tall rows around the target)
+        "vineyard_n_rows": 2,
+        "vineyard_row_spacing": 4.0,
+        "vineyard_within_row_spacing": 2.0,
+        "vineyard_jitter": 0.15,
+        "vineyard_height": 3.0,
         # Depth camera
         "render_interval": 1,
         "max_depth": 20.0,
@@ -168,21 +178,21 @@ def get_cfgs(env_v2=False):
     if env_v2:
         reward_cfg = {
             "reward_scales": {
-                "progress":           5.0,
-                "close":              1.0,
-                "obstacle_proximity": -6.0,
-                "crash":            -100.0,
-                "success":           200.0,
+                "progress":           0.5,
+                "close":              0.1,
+                "obstacle_proximity": -0.6,
+                "crash":             -10.0,
+                "success":            20.0,
             },
         }
     else:
         reward_cfg = {
             "reward_scales": {
-                "distance":           -5.0,
-                "time":               -0.5,
-                "obstacle_proximity": -6.0,
-                "crash":            -100.0,
-                "success":           200.0,
+                "distance":           -0.5,
+                "time":               -0.05,
+                "obstacle_proximity": -0.6,
+                "crash":             -10.0,
+                "success":            20.0,
             },
         }
 
@@ -198,13 +208,25 @@ def main():
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to checkpoint to resume from (e.g. logs/obstacle-avoidance/model_300.pt)")
     parser.add_argument("--env-v2", action="store_true", help="Use V2 env (progress+close rewards, no dt-scaling)")
+    parser.add_argument("--placement", choices=["strategic", "vineyard"], default="strategic",
+                        help="Post-curriculum obstacle placement strategy")
+    parser.add_argument("--adaptive-lr", action="store_true",
+                        help="Enable rsl-rl adaptive KL-based LR schedule (default: fixed LR)")
+    parser.add_argument("--desired-kl", type=float, default=0.01,
+                        help="Target KL divergence for adaptive schedule (default: 0.01)")
+    parser.add_argument("--learning-rate", type=float, default=0.001,
+                        help="PPO learning rate (default: 0.001)")
     args = parser.parse_args()
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning", performance_mode=True)
 
     log_dir = f"logs/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg = get_cfgs(env_v2=args.env_v2)
-    train_cfg = get_train_cfg(args.exp_name, args.max_iterations)
+    train_cfg = get_train_cfg(
+        args.exp_name, args.max_iterations,
+        adaptive_lr=args.adaptive_lr, desired_kl=args.desired_kl,
+        learning_rate=args.learning_rate,
+    )
     if args.env_v2:
         train_cfg["wandb_project"] = "obstacle-avoidance-v2"
 
@@ -215,6 +237,8 @@ def main():
 
     if args.vis:
         env_cfg["visualize_target"] = True
+
+    env_cfg["placement_strategy"] = args.placement
 
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, train_cfg],
@@ -234,7 +258,12 @@ def main():
     runner = OnPolicyRunner(env, copy.deepcopy(train_cfg), log_dir, device=gs.device)
     if args.resume is not None:
         runner.load(args.resume)
-        print(f"Resumed from {args.resume} at iteration {runner.current_learning_iteration}")
+        # Sync env curriculum clock with runner progress. Without this, global_step
+        # resets to 0 on every resume and the env never exits curriculum when HPC
+        # sessions are shorter than curriculum_steps / num_steps_per_env iterations.
+        env.global_step = runner.current_learning_iteration * train_cfg["num_steps_per_env"]
+        print(f"Resumed from {args.resume} at iteration {runner.current_learning_iteration} "
+              f"(env.global_step={env.global_step}, curriculum_steps={env_cfg.get('curriculum_steps', 0)})")
     runner.learn(num_learning_iterations=args.max_iterations, init_at_random_ep_len=True)
 
 

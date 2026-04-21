@@ -259,6 +259,30 @@ echo -e "   ${DIM}Will train ${ADDITIONAL} additional iterations (${RESUME_ITER}
 ask "Batch size" "256"
 BATCH="$REPLY"
 
+# Adaptive LR + learning rate override (only wired into continuous train_rl_wb.py)
+ADAPTIVE_LR="false"
+DESIRED_KL=""
+LEARNING_RATE=""
+if [ "$ACTION_SPACE" = "continuous" ]; then
+    ask_yn "Adaptive LR (KL)" "n"
+    ADAPTIVE_LR="$REPLY"
+    if [ "$ADAPTIVE_LR" = "true" ]; then
+        ask "Desired KL" "0.02"
+        DESIRED_KL="$REPLY"
+    fi
+    ask "Learning rate" "0.0005"
+    LEARNING_RATE="$REPLY"
+fi
+
+# Optional rename: fork the experiment into a new log dir with copied checkpoints
+if [ "$ADAPTIVE_LR" = "true" ]; then
+    DEFAULT_NEW_NAME="${RUN_NAME}-adaptiveKL"
+else
+    DEFAULT_NEW_NAME="${RUN_NAME}-continued"
+fi
+ask "New exp name (blank=keep)" "$DEFAULT_NEW_NAME"
+NEW_RUN_NAME="$REPLY"
+
 # ╔══════════════════════════════════════╗
 # ║  5. Cluster resources                ║
 # ╚══════════════════════════════════════╝
@@ -300,26 +324,63 @@ case "$ACTION_SPACE" in
     *)               TRAIN_SCRIPT="train_rl_wb.py" ;;
 esac
 
-# Resume path relative to proto dir
-RESUME_PATH="logs/${RUN_NAME}/model_${RESUME_ITER}.pt"
+# Fork into a new experiment dir if renamed, otherwise continue in place.
+# Forking copies all model_*.pt from the source dir so eval/plotting has full
+# history, and leaves cfgs.pkl to be rewritten by train_rl_wb.py at launch
+# (so it reflects the new flags — adaptive-lr, etc).
+if [ -n "$NEW_RUN_NAME" ] && [ "$NEW_RUN_NAME" != "$RUN_NAME" ]; then
+    EFFECTIVE_RUN_NAME="$NEW_RUN_NAME"
+    NEW_RUN_DIR="${LOGS_DIR}/${NEW_RUN_NAME}"
+    if [ -d "$NEW_RUN_DIR" ]; then
+        echo -e "   ${DIM}Target dir already exists:${RESET} $NEW_RUN_DIR"
+        ask_yn "Overwrite?" "n"
+        if [ "$REPLY" != "true" ]; then
+            echo -e "   ${DIM}Cancelled.${RESET}\n"; exit 0
+        fi
+        rm -rf "$NEW_RUN_DIR"
+    fi
+    mkdir -p "$NEW_RUN_DIR"
+    echo -e "   ${DIM}Copying checkpoints:${RESET} ${RUN_DIR} -> ${NEW_RUN_DIR}"
+    cp "$RUN_DIR"/model_*.pt "$NEW_RUN_DIR"/
+else
+    EFFECTIVE_RUN_NAME="$RUN_NAME"
+fi
+
+# Resume path relative to proto dir (points at the ckpt in the effective dir)
+RESUME_PATH="logs/${EFFECTIVE_RUN_NAME}/model_${RESUME_ITER}.pt"
 
 # Build args
-TRAIN_ARGS="-e ${RUN_NAME} -B ${BATCH} --max_iterations ${MAX_ITERS} --resume ${RESUME_PATH}"
+TRAIN_ARGS="-e ${EFFECTIVE_RUN_NAME} -B ${BATCH} --max_iterations ${MAX_ITERS} --resume ${RESUME_PATH}"
 if [ "$ENV_VERSION" = "v2" ] && [ "$ACTION_SPACE" = "continuous" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --env-v2"
 fi
+if [ "$ADAPTIVE_LR" = "true" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --adaptive-lr --desired-kl ${DESIRED_KL}"
+fi
+if [ -n "$LEARNING_RATE" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --learning-rate ${LEARNING_RATE}"
+fi
 
-JOB_NAME="continue-${RUN_NAME}-from-${RESUME_ITER}"
+JOB_NAME="continue-${EFFECTIVE_RUN_NAME}-from-${RESUME_ITER}"
 
 # ╔══════════════════════════════════════╗
 # ║  7. Confirmation                     ║
 # ╚══════════════════════════════════════╝
 section "Summary"
 info "Run" "$RUN_NAME"
+if [ "$EFFECTIVE_RUN_NAME" != "$RUN_NAME" ]; then
+    info "Forked to" "$EFFECTIVE_RUN_NAME"
+fi
 info "Resume from" "iteration ${RESUME_ITER}"
 info "Train to" "iteration ${MAX_ITERS} (+${ADDITIONAL})"
 info "Action space" "$ACTION_SPACE"
 info "Env version" "$ENV_VERSION"
+if [ "$ADAPTIVE_LR" = "true" ]; then
+    info "Adaptive LR" "enabled (desired_kl=${DESIRED_KL})"
+fi
+if [ -n "$LEARNING_RATE" ]; then
+    info "Learning rate" "$LEARNING_RATE"
+fi
 info "Script" "$TRAIN_SCRIPT"
 info "Command" "python ${TRAIN_SCRIPT} ${TRAIN_ARGS}"
 echo ""

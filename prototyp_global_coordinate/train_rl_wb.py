@@ -39,7 +39,7 @@ def get_train_cfg(exp_name, max_iterations):
         "algorithm": {
             "class_name": "PPO",
             "clip_param": 0.2,
-            "desired_kl": 0.01,
+            "desired_kl": 0.02,
             "entropy_coef": 0.001,
             "gamma": 0.99,
             "lam": 0.95,

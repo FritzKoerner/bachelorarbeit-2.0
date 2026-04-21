@@ -37,6 +37,40 @@ def find_latest_checkpoint(log_dir: str) -> tuple[str, int]:
     return best, iter_num(best)
 
 
+# ---------------------------------------------------------------------------
+# Placement-strategy override (eval-time, independent of training)
+# ---------------------------------------------------------------------------
+
+# Backfilled when an older cfgs.pkl predates the vineyard feature.
+_VINEYARD_DEFAULTS = {
+    "vineyard_n_rows": 2,
+    "vineyard_row_spacing": 4.0,
+    "vineyard_within_row_spacing": 2.0,
+    "vineyard_jitter": 0.15,
+    "vineyard_height": 3.0,
+}
+
+
+def apply_placement_override(env_cfg, placement):
+    """Force env_cfg['placement_strategy'] regardless of training-time value.
+
+    For 'vineyard', also backfills missing vineyard_* keys so legacy configs
+    (trained before the feature existed) still get sane row geometry.
+    """
+    if placement is None:
+        return
+    env_cfg["placement_strategy"] = placement
+    if placement == "vineyard":
+        for k, v in _VINEYARD_DEFAULTS.items():
+            env_cfg.setdefault(k, v)
+        # Mirror the env's vineyard-height override into env_cfg itself so
+        # downstream consumers (e.g. record_landing Pass 2) get the right
+        # box size when reconstructing the scene from the dict.
+        size = list(env_cfg.get("obstacle_size", [1.0, 1.0, 2.0]))
+        size[2] = env_cfg["vineyard_height"]
+        env_cfg["obstacle_size"] = size
+
+
 def resolve_hpc_log_dir(run_name):
     """Resolve --hpc run name to log_dir path, or list available runs and exit."""
     proto_dir = os.path.basename(os.path.dirname(os.path.abspath(__file__)))
@@ -299,6 +333,11 @@ def main():
     parser.add_argument("--wandb_project",    type=str, default="obstacle-avoidance")
     parser.add_argument("--vis", action="store_true",
                         help="Run single visual episode with viewer (no stats/W&B)")
+    parser.add_argument("--no-obstacles", action="store_true",
+                        help="Hide all obstacles (curriculum Phase 1). Default is strategic placement.")
+    parser.add_argument("--placement", choices=["strategic", "vineyard"], default=None,
+                        help="Override placement strategy regardless of how the model was trained. "
+                             "Default: use whatever cfgs.pkl specifies.")
     args = parser.parse_args()
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
@@ -323,7 +362,10 @@ def main():
 
     # Eval-time overrides
     reward_cfg["reward_scales"] = {}
-    env_cfg["curriculum_steps"] = float("inf")  # TODO: revert — temporarily disable obstacles
+    # Default: strategic obstacles from step 0 (matches end-of-training distribution).
+    # --no-obstacles forces Phase 1 (all obstacles hidden underground).
+    env_cfg["curriculum_steps"] = float("inf") if args.no_obstacles else 0
+    apply_placement_override(env_cfg, args.placement)
 
     if args.vis:
         env_cfg["visualize_target"] = True

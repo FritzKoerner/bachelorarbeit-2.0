@@ -16,6 +16,7 @@ from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 from envs.obstacle_avoidance_env import ObstacleAvoidanceEnv
 from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl from W&B training
+from eval_rl_wb import apply_placement_override
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +242,11 @@ def main():
     parser.add_argument("--num_envs",         type=int, default=50)
     parser.add_argument("--num_episodes",     type=int, default=100)
     parser.add_argument("--vis", action="store_true")
+    parser.add_argument("--no-obstacles", action="store_true",
+                        help="Hide all obstacles (curriculum Phase 1). Default is strategic placement.")
+    parser.add_argument("--placement", choices=["strategic", "vineyard"], default=None,
+                        help="Override placement strategy regardless of how the model was trained. "
+                             "Default: use whatever cfgs.pkl specifies.")
     args = parser.parse_args()
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
@@ -265,7 +271,9 @@ def main():
     print(f"Loading checkpoint: {resume_path}  (iteration {ckpt_iter})")
 
     reward_cfg["reward_scales"] = {}
-    env_cfg["curriculum_steps"] = float("inf")  # TODO: revert — temporarily disable obstacles
+    # Default: strategic obstacles from step 0. --no-obstacles forces Phase 1.
+    env_cfg["curriculum_steps"] = float("inf") if args.no_obstacles else 0
+    apply_placement_override(env_cfg, args.placement)
 
     if args.vis:
         env_cfg["visualize_target"] = True

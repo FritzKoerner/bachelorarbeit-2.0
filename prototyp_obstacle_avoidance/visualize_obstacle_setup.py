@@ -33,6 +33,13 @@ OBS_SIZE = (1.0, 1.0, 2.0)
 COLLISION_RADIUS = 0.8
 SAFETY_RADIUS = 3.0
 
+# Vineyard strategy (3 m tall rows, target in centre aisle)
+VINEYARD_N_ROWS = 2
+VINEYARD_ROW_SPACING = 4.0
+VINEYARD_WITHIN_SPACING = 2.0
+VINEYARD_JITTER = 0.15
+VINEYARD_HEIGHT = 3.0
+
 
 def place_strategic(spawn_xy, target_xy):
     """Replicate _place_obstacles_strategic in numpy."""
@@ -70,6 +77,41 @@ def place_strategic(spawn_xy, target_xy):
         positions.append(pos)
 
     return np.array(positions)
+
+
+def place_vineyard(target_xy, row_along_y=None):
+    """Replicate _place_obstacles_vineyard in numpy.
+
+    Rows are placed symmetrically around the target on the perpendicular axis
+    so the target is always in the centre aisle. Row orientation is random
+    per call unless forced.
+    """
+    if row_along_y is None:
+        row_along_y = np.random.rand() < 0.5
+    obstacles_per_row = NUM_OBSTACLES // VINEYARD_N_ROWS
+    half = (VINEYARD_N_ROWS - 1) / 2.0
+    row_offsets = (np.arange(VINEYARD_N_ROWS) - half) * VINEYARD_ROW_SPACING
+    center_k = (obstacles_per_row - 1) / 2.0
+
+    positions = []
+    for r in range(VINEYARD_N_ROWS):
+        row_offset = row_offsets[r]
+        for k in range(obstacles_per_row):
+            along = (k - center_k) * VINEYARD_WITHIN_SPACING
+            jit_a = np.random.uniform(-VINEYARD_JITTER, VINEYARD_JITTER)
+            jit_p = np.random.uniform(-VINEYARD_JITTER, VINEYARD_JITTER)
+            if row_along_y:
+                pos = np.array([
+                    target_xy[0] + row_offset + jit_p,
+                    target_xy[1] + along + jit_a,
+                ])
+            else:
+                pos = np.array([
+                    target_xy[0] + along + jit_a,
+                    target_xy[1] + row_offset + jit_p,
+                ])
+            positions.append(pos)
+    return np.array(positions), row_along_y
 
 
 fig, axes = plt.subplots(1, 2, figsize=(16, 8))
@@ -264,6 +306,137 @@ print("Saved: prototyp_obstacle_avoidance/obstacle_setup_sideview.png")
 plt.close()
 
 
+# ========== VINEYARD (NEW STRATEGY) ==========
+fig3, (ax_v, ax_v_side) = plt.subplots(1, 2, figsize=(16, 8))
+fig3.suptitle(
+    "Vineyard-row Placement (3 m tall rows, target always in centre aisle)",
+    fontsize=14, fontweight="bold",
+)
+
+# --- Top-down XY (3 sample configs) ---
+ax_v.set_title(
+    "Top-down (XY) — 3 samples: different targets & row orientations",
+    fontsize=11,
+)
+ax_v.set_xlabel("X (m)")
+ax_v.set_ylabel("Y (m)")
+ax_v.set_aspect("equal")
+ax_v.grid(True, alpha=0.3)
+
+# Drone spawn region
+ax_v.add_patch(patches.Rectangle(
+    (-SPAWN_OFFSET, -SPAWN_OFFSET), 2 * SPAWN_OFFSET, 2 * SPAWN_OFFSET,
+    linewidth=2, edgecolor="blue", facecolor="blue", alpha=0.06,
+    linestyle=":", label="Drone spawn region",
+))
+
+# Force one of each row orientation so the plot shows both variants
+sample_targets = [
+    np.array([3.0, 3.0]),    # env with rows along Y
+    np.array([-3.0, 2.0]),   # env with rows along X
+    np.array([2.0, -3.0]),   # env with rows along Y again
+]
+sample_row_dirs = [True, False, True]
+sample_colors_v = ["#8e44ad", "#16a085", "#d35400"]
+
+for s, (tgt, row_along_y, color) in enumerate(
+    zip(sample_targets, sample_row_dirs, sample_colors_v)
+):
+    obstacles, _ = place_vineyard(tgt, row_along_y=row_along_y)
+
+    # Centre-aisle shading (box of width row_spacing perpendicular to rows)
+    half_aisle = VINEYARD_ROW_SPACING / 2.0
+    aisle_half_len = (NUM_OBSTACLES // VINEYARD_N_ROWS - 1) * VINEYARD_WITHIN_SPACING / 2 + 1.0
+    if row_along_y:
+        aisle_rect = patches.Rectangle(
+            (tgt[0] - half_aisle + OBS_SIZE[0] / 2, tgt[1] - aisle_half_len),
+            VINEYARD_ROW_SPACING - OBS_SIZE[0], 2 * aisle_half_len,
+            facecolor=color, alpha=0.05, edgecolor=color, linestyle=":", linewidth=0.8,
+        )
+    else:
+        aisle_rect = patches.Rectangle(
+            (tgt[0] - aisle_half_len, tgt[1] - half_aisle + OBS_SIZE[1] / 2),
+            2 * aisle_half_len, VINEYARD_ROW_SPACING - OBS_SIZE[1],
+            facecolor=color, alpha=0.05, edgecolor=color, linestyle=":", linewidth=0.8,
+        )
+    ax_v.add_patch(aisle_rect)
+
+    # Obstacles
+    for i, pos in enumerate(obstacles):
+        ax_v.add_patch(patches.Rectangle(
+            (pos[0] - OBS_SIZE[0] / 2, pos[1] - OBS_SIZE[1] / 2),
+            OBS_SIZE[0], OBS_SIZE[1],
+            linewidth=1.4, edgecolor=color, facecolor=color, alpha=0.55,
+        ))
+        ax_v.add_patch(plt.Circle((pos[0], pos[1]), SAFETY_RADIUS,
+            fill=False, edgecolor=color, alpha=0.12, linestyle="--", linewidth=0.5))
+
+    # Target
+    ax_v.plot(tgt[0], tgt[1], "*", color=color, markersize=18,
+              markeredgecolor="black", markeredgewidth=0.8, zorder=10)
+
+    if s == 0:
+        ax_v.plot([], [], "s", color=color, markersize=8, alpha=0.55,
+                  label="Vineyard obstacle (1×1 m)")
+        ax_v.plot([], [], "*", color="black", markersize=12,
+                  markerfacecolor="white", label="Target (in aisle)")
+
+# A representative spawn for visual context
+ax_v.plot(0.0, 0.0, "^", color="blue", markersize=10, alpha=0.6,
+          label="Drone spawn (example)")
+
+ax_v.set_xlim(-10, 10)
+ax_v.set_ylim(-10, 10)
+ax_v.legend(loc="upper left", fontsize=8)
+
+# --- Side view XZ (show 3 m height & spawn at 10 m) ---
+ax_v_side.set_title(
+    "Side view (XZ) — rows are 3 m tall, drone spawns at 10 m",
+    fontsize=11,
+)
+ax_v_side.set_xlabel("X (m)")
+ax_v_side.set_ylabel("Z (m)")
+ax_v_side.set_aspect("equal")
+ax_v_side.grid(True, alpha=0.3)
+ax_v_side.axhline(y=0, color="brown", linewidth=2, alpha=0.5)
+ax_v_side.fill_between([-10, 12], 0, -0.5, color="brown", alpha=0.1)
+
+# One sample: rows along X so we see multiple boxes across X axis
+tgt_side = np.array([2.0, -3.0])
+obstacles_side, _ = place_vineyard(tgt_side, row_along_y=False)
+
+for pos in obstacles_side:
+    ax_v_side.add_patch(patches.Rectangle(
+        (pos[0] - OBS_SIZE[0] / 2, 0), OBS_SIZE[0], VINEYARD_HEIGHT,
+        linewidth=1.3, edgecolor="#8e44ad", facecolor="#8e44ad", alpha=0.5,
+    ))
+
+# Target
+ax_v_side.plot(tgt_side[0], TARGET[2], "*", color="green", markersize=18, zorder=10,
+               label=f"Target (z={TARGET[2]} m)")
+# Spawn
+ax_v_side.plot(-3.0, SPAWN_HEIGHT, "^", color="blue", markersize=12,
+               zorder=10, label=f"Drone spawn (z={SPAWN_HEIGHT} m)")
+# Descent path
+ax_v_side.annotate("", xy=(tgt_side[0], TARGET[2] + 0.3),
+                   xytext=(-3.0, SPAWN_HEIGHT - 0.3),
+                   arrowprops=dict(arrowstyle="->", color="blue",
+                                   lw=1.5, alpha=0.4, ls="--"))
+# Row height label
+ax_v_side.annotate(f"{VINEYARD_HEIGHT} m", xy=(obstacles_side[0, 0] + 0.8, VINEYARD_HEIGHT / 2),
+                   fontsize=9, color="#8e44ad", fontweight="bold")
+
+ax_v_side.set_xlim(-8, 10)
+ax_v_side.set_ylim(-1, 12)
+ax_v_side.legend(loc="upper right", fontsize=9)
+
+plt.tight_layout()
+plt.savefig("prototyp_obstacle_avoidance/obstacle_setup_vineyard.png",
+            dpi=150, bbox_inches="tight")
+print("Saved: prototyp_obstacle_avoidance/obstacle_setup_vineyard.png")
+plt.close()
+
+
 # ========== STATS ==========
 print("\n=== Configuration Comparison ===")
 print(f"{'':30s} {'Curriculum':>15s} {'Post-curriculum':>15s}")
@@ -311,3 +484,29 @@ for _ in range(n_tests):
             encounters += 1
             break
 print(f"Path enters safety radius:     {encounters/n_tests:.1%} of {n_tests} random spawns")
+
+
+# Vineyard: verify target is never inside an obstacle footprint
+print("\n=== Vineyard Aisle Check ===")
+min_clears = []
+target_in_row = 0
+for _ in range(n_tests):
+    tx = np.random.uniform(-5, 5)
+    ty = np.random.uniform(-5, 5)
+    tgt = np.array([tx, ty])
+    obs, _ = place_vineyard(tgt)
+    # Distance from target to nearest obstacle surface (AABB distance)
+    diffs = np.abs(obs - tgt)
+    clamped = np.clip(diffs - np.array([OBS_SIZE[0] / 2, OBS_SIZE[1] / 2]), 0, None)
+    surf_dists = np.linalg.norm(clamped, axis=1)
+    min_clear = surf_dists.min()
+    min_clears.append(min_clear)
+    if min_clear <= 0.0:
+        target_in_row += 1
+min_clears = np.array(min_clears)
+print(f"Target inside an obstacle:      {target_in_row/n_tests:.1%} of {n_tests} random targets")
+print(f"Min target->row clearance:      {min_clears.min():.3f} m")
+print(f"Mean target->row clearance:     {min_clears.mean():.3f} m")
+print(f"Expected min clearance:         "
+      f"{VINEYARD_ROW_SPACING / 2 - OBS_SIZE[0] / 2 - VINEYARD_JITTER:.3f} m "
+      f"(row_spacing/2 - box/2 - jitter)")

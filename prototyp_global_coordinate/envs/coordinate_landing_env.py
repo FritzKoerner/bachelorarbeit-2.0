@@ -390,9 +390,6 @@ class CoordinateLandingEnv:
         # Debug / monitoring metrics
         ep_len = self.episode_length_buf[envs_idx].float().clamp(min=1)
         mean_ep_len = ep_len.mean()
-        self.extras["episode"]["terminal_dist"] = torch.norm(
-            self.rel_pos[envs_idx], dim=1
-        ).mean().item()
         self.extras["episode"]["action_saturation_rate"] = (
             self.action_saturated_count[envs_idx].mean() / mean_ep_len
         ).item()
