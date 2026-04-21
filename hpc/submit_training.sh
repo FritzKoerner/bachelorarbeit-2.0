@@ -70,6 +70,22 @@ case "${version_choice:-1}" in
     *) ENV_VERSION="v1" ;;
 esac
 
+# ╔══════════════════════════════════════╗
+# ║  1c. Scenario (obstacle_avoidance)   ║
+# ╚══════════════════════════════════════╝
+SCENARIO="default"
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    section "Scenario"
+    echo -e "   ${WHITE}1)${RESET} default  ${DIM}(±5 m square spawn, fixed 10 m altitude, current placement)${RESET}"
+    echo -e "   ${WHITE}2)${RESET} hard     ${DIM}(10 m ring + ±5 m jitter, 5–10 m altitude, 4-row vineyard, 3 m cubes)${RESET}"
+    printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
+    read -r scenario_choice
+    case "${scenario_choice:-1}" in
+        2) SCENARIO="hard" ;;
+        *) SCENARIO="default" ;;
+    esac
+fi
+
 # --- Per-prototype defaults ---
 case "$PROTOTYPE" in
     obstacle_avoidance)
@@ -84,6 +100,9 @@ esac
 DEF_EXP_NAME="genesis-${PROTOTYPE}"
 if [ "$ENV_VERSION" = "v2" ]; then
     DEF_EXP_NAME="${DEF_EXP_NAME}-v2"
+fi
+if [ "$SCENARIO" = "hard" ]; then
+    DEF_EXP_NAME="${DEF_EXP_NAME}-hard"
 fi
 
 # ╔══════════════════════════════════════╗
@@ -161,6 +180,9 @@ TRAIN_ARGS="-e ${EXP_NAME} -B ${BATCH} --max_iterations ${ITERS}"
 if [ "$ENV_VERSION" = "v2" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --env-v2"
 fi
+if [ "$SCENARIO" = "hard" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --scenario hard"
+fi
 if [ "$ADAPTIVE_LR" = "true" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --adaptive-lr --desired-kl ${DESIRED_KL}"
 fi
@@ -170,6 +192,9 @@ JOB_NAME="${EXP_NAME}"
 section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
 info "Env version" "$ENV_VERSION"
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    info "Scenario" "$SCENARIO"
+fi
 info "Experiment" "$EXP_NAME"
 info "Script" "$TRAIN_SCRIPT"
 info "Command" "python ${TRAIN_SCRIPT} ${TRAIN_ARGS}"

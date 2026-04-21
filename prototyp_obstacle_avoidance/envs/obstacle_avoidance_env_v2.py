@@ -767,8 +767,18 @@ class ObstacleAvoidanceEnvV2:
 
         # Randomize drone spawn
         offset = self.env_cfg["spawn_offset"]
-        sx = gs_rand_float(-offset, offset, (n,), gs.device)
-        sy = gs_rand_float(-offset, offset, (n,), gs.device)
+        ring_radius = self.env_cfg.get("spawn_ring_radius", 0.0)
+        if ring_radius > 0.0:
+            # Spawn on a ring of radius `spawn_ring_radius` around the target,
+            # at a random angle, then add the symmetric +/- spawn_offset jitter.
+            angle = gs_rand_float(0.0, 2.0 * math.pi, (n,), gs.device)
+            sx = (self.target_pos[envs_idx, 0] + ring_radius * torch.cos(angle)
+                  + gs_rand_float(-offset, offset, (n,), gs.device))
+            sy = (self.target_pos[envs_idx, 1] + ring_radius * torch.sin(angle)
+                  + gs_rand_float(-offset, offset, (n,), gs.device))
+        else:
+            sx = gs_rand_float(-offset, offset, (n,), gs.device)
+            sy = gs_rand_float(-offset, offset, (n,), gs.device)
         sz = gs_rand_float(
             self.env_cfg["spawn_height_min"],
             self.env_cfg["spawn_height_max"],

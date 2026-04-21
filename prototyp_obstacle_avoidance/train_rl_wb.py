@@ -197,6 +197,29 @@ def get_cfgs(env_v2=False):
     return env_cfg, obs_cfg, reward_cfg
 
 
+def _apply_hard_scenario(env_cfg):
+    """Mutate env_cfg in place with the "hard" training preset.
+
+    Spawn at a 10 m ring around the target with the existing +/-5 m square
+    jitter, random altitude in [5, 10] m, and a denser 4-row vineyard of
+    3 m cubes so the agent can't trivially squeeze between obstacles.
+    """
+    env_cfg.update({
+        # Spawn — ring around target + existing jitter, random altitude
+        "spawn_ring_radius": 10.0,
+        "spawn_offset": 5.0,
+        "spawn_height_min": 5.0,
+        "spawn_height_max": 10.0,
+        # 4-row vineyard of 3 m cubes (centers spaced to leave ~1 m gaps)
+        "placement_strategy": "vineyard",
+        "vineyard_n_rows": 4,
+        "vineyard_within_row_spacing": 4.0,
+        "vineyard_row_spacing": 5.0,
+        "vineyard_height": 3.0,
+        "obstacle_size": [3.0, 3.0, 3.0],
+    })
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="obstacle-avoidance")
@@ -208,6 +231,9 @@ def main():
     parser.add_argument("--env-v2", action="store_true", help="Use V2 env (progress+close rewards, no dt-scaling)")
     parser.add_argument("--placement", choices=["strategic", "vineyard"], default="strategic",
                         help="Post-curriculum obstacle placement strategy")
+    parser.add_argument("--scenario", choices=["default", "hard"], default="default",
+                        help="Training scenario preset. 'hard' overrides spawn + placement "
+                             "(10 m ring spawn, 5-10 m altitude, 4-row vineyard, 3 m cubes).")
     parser.add_argument("--adaptive-lr", action="store_true",
                         help="Enable rsl-rl adaptive KL-based LR schedule (default: fixed LR)")
     parser.add_argument("--desired-kl", type=float, default=0.01,
@@ -237,6 +263,10 @@ def main():
         env_cfg["visualize_target"] = True
 
     env_cfg["placement_strategy"] = args.placement
+
+    # Scenario presets (override placement + spawn settings as a bundle).
+    if args.scenario == "hard":
+        _apply_hard_scenario(env_cfg)
 
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, train_cfg],
