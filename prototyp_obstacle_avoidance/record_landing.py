@@ -34,6 +34,7 @@ import sys
 import cv2
 import numpy as np
 import torch
+from scipy.spatial.transform import Rotation as R
 
 from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
@@ -119,6 +120,7 @@ def _pass1_record_trajectory(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
         dt=render_env.dt,
         outcome=outcome,
         final_dist=final_dist,
+        max_depth=float(cfg.get("max_depth", 20.0)),
     )
 
     # Tear down inference scene before returning. Callers still do a gc pass.
@@ -155,13 +157,59 @@ def _compute_camera_framing(positions, target_pos, obstacle_positions, fov=90):
     return cam_pos, lookat
 
 
-def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1):
+def _pov_camera_pose(drone_pos, drone_quat_wxyz):
+    """Mirror the live env's POV-cam geometry: 0.1 m below the drone body,
+    looking horizontally forward + 45 deg downward.
+
+    Returns (pos, lookat) as numpy arrays in world coords.
+    """
+    qw, qx, qy, qz = drone_quat_wxyz
+    fwd_world = R.from_quat([qx, qy, qz, qw]).apply(np.array([1.0, 0.0, 0.0]))
+    fwd_xy = fwd_world.copy()
+    fwd_xy[2] = 0.0
+    norm = np.linalg.norm(fwd_xy)
+    if norm < 1e-4:
+        fwd_xy = np.array([1.0, 0.0, 0.0])
+    else:
+        fwd_xy /= norm
+
+    pos = np.asarray(drone_pos, dtype=np.float64).copy()
+    pos[2] -= 0.1
+    lookat = pos + fwd_xy + np.array([0.0, 0.0, -1.0])
+    return pos, lookat
+
+
+def _depth_to_viridis_uint8(depth_m, max_depth):
+    """Match the env's CNN-input normalization, then apply viridis.
+
+    depth_m is the raw metric depth from camera.render(depth=True).
+    Uses the same `clamp(depth/max_depth, 0, 1)` mapping as the live env so
+    the POV depth video shows what the CNN sees, just at higher resolution.
+    """
+    if isinstance(depth_m, torch.Tensor):
+        depth_m = depth_m.cpu().numpy()
+    if depth_m.ndim == 3:
+        depth_m = depth_m[0]  # (1, H, W) -> (H, W) when env_separate_rigid
+    depth_norm = np.clip(depth_m / max_depth, 0.0, 1.0)
+    depth_uint8 = (depth_norm * 255.0).astype(np.uint8)
+    # COLORMAP_VIRIDIS yields a BGR uint8 image suitable for cv2.VideoWriter.
+    return cv2.applyColorMap(depth_uint8, cv2.COLORMAP_VIRIDIS)
+
+
+def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
+                        pov_rgb_path=None, pov_depth_path=None,
+                        pov_res=(480, 480), pov_fov=90):
     """Build a minimal viz scene, replay the recorded trajectory, encode MP4.
 
     No physics stepping, no policy, no PID. The drone is moved kinematically
-    each substep via set_pos/set_quat. Because there is only one camera, the
-    BatchRenderer uniform-resolution constraint does not apply -- renderer
-    choice is free. We use the Rasterizer (set_pos updates visuals directly).
+    each substep via set_pos/set_quat. Pass 2 uses the Rasterizer (set_pos
+    updates visuals directly), which has no uniform-resolution constraint --
+    so we can co-host the high-res third-person cam and a body-attached POV
+    cam in the same scene.
+
+    If pov_rgb_path / pov_depth_path are provided, also writes drone-POV
+    videos rendered with the same geometry as the live env's depth camera
+    (45 deg downtilt, 0.1 m below body center).
     """
     positions = record["positions"]
     quaternions = record["quaternions"]
@@ -169,6 +217,7 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1):
     target_pos = record["target_pos"]
     ox, oy, oz = record["obstacle_size"]
     dt = record["dt"]
+    max_depth = record.get("max_depth", 20.0)
 
     fov = 90
     cam_pos, lookat = _compute_camera_framing(
@@ -235,6 +284,17 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1):
         res=res, pos=cam_pos, lookat=lookat, fov=fov, GUI=False,
     )
 
+    record_pov = pov_rgb_path is not None or pov_depth_path is not None
+    if record_pov:
+        # Initial pose is fine -- it gets overwritten before every render.
+        pov_cam = scene.add_camera(
+            res=pov_res,
+            pos=(float(positions[0][0]), float(positions[0][1]), float(positions[0][2])),
+            lookat=(float(positions[0][0]) + 1.0, float(positions[0][1]), 0.0),
+            fov=pov_fov,
+            GUI=False,
+        )
+
     scene.build(n_envs=1, env_spacing=(40.0, 40.0))
 
     device = gs.device
@@ -250,6 +310,8 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1):
 
     # Replay loop.
     frames = []
+    pov_rgb_frames = []
+    pov_depth_frames = []
     trail_positions = []
     last_drawn_idx = 0
     trail_interval = max(1, 50 // render_every)
@@ -273,7 +335,22 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1):
         # With gravity=0 and zero RPM, physics is a no-op; the drone stays put.
         scene.step()
 
-        # Incremental trail update.
+        # POV render BEFORE the trail debug-mesh is updated so the FPV cam
+        # never sees the agent's own past path.
+        if record_pov:
+            pov_pos, pov_lookat = _pov_camera_pose(positions[t], quaternions[t])
+            pov_cam.set_pose(pos=tuple(pov_pos), lookat=tuple(pov_lookat))
+            pov_rgb, pov_depth, _, _ = pov_cam.render(depth=True)
+            if isinstance(pov_rgb, torch.Tensor):
+                pov_rgb = pov_rgb.cpu().numpy()
+            if pov_rgb.ndim == 4:
+                pov_rgb = pov_rgb[0]
+            if pov_rgb_path is not None:
+                pov_rgb_frames.append(pov_rgb)
+            if pov_depth_path is not None:
+                pov_depth_frames.append(_depth_to_viridis_uint8(pov_depth, max_depth))
+
+        # Incremental trail update (only affects the third-person view).
         trail_positions.append(positions[t])
         n = len(trail_positions)
         if n > last_drawn_idx + trail_interval:
@@ -313,12 +390,33 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1):
     physics_fps = 1.0 / dt
     fps = min(120.0, max(10.0, physics_fps / render_every))
 
-    h, w = frames[0].shape[:2]
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
+    h, w = frames[0].shape[:2]
     writer = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
     for frame in frames:
         writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
     writer.release()
+
+    # POV frames are written rotated 90 deg CW so "up" in the video matches
+    # the drone's body-up axis. Genesis cameras combined with our 45 deg
+    # downward look direction otherwise yield a sideways-feeling FPV.
+    # Rotation swaps width and height in the encoder's expected dims.
+    if pov_rgb_path is not None and pov_rgb_frames:
+        src_h, src_w = pov_rgb_frames[0].shape[:2]
+        w_pov_rgb = cv2.VideoWriter(pov_rgb_path, fourcc, fps, (src_h, src_w))
+        for frame in pov_rgb_frames:
+            rot = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            w_pov_rgb.write(cv2.cvtColor(rot, cv2.COLOR_RGB2BGR))
+        w_pov_rgb.release()
+
+    if pov_depth_path is not None and pov_depth_frames:
+        src_h, src_w = pov_depth_frames[0].shape[:2]
+        # _depth_to_viridis_uint8 already returns BGR uint8 -- write as-is.
+        w_pov_depth = cv2.VideoWriter(pov_depth_path, fourcc, fps, (src_h, src_w))
+        for frame in pov_depth_frames:
+            w_pov_depth.write(cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE))
+        w_pov_depth.release()
 
     return len(frames)
 
@@ -329,13 +427,16 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1):
 
 def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
                    log_dir, ckpt, seed=42, render_every=1, res=(1920, 1080),
-                   no_obstacles=False):
-    """Record one landing episode and save as MP4.
+                   no_obstacles=False, record_pov=True, pov_res=(480, 480)):
+    """Record one landing episode and save as MP4(s).
 
     Pass 1 runs the policy in the real env to record the trajectory.
-    Pass 2 replays that trajectory in a minimal scene with only the video cam.
+    Pass 2 replays that trajectory in a minimal scene and renders:
+      - third-person video (always)
+      - drone-POV RGB + viridis-depth videos (when record_pov=True)
 
-    Returns (out_path, outcome, final_dist, num_frames).
+    Returns (out_path, outcome, final_dist, num_frames). The POV side outputs
+    are written next to out_path with `_pov_rgb` / `_pov_depth` suffixes.
     """
     record = _pass1_record_trajectory(
         EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
@@ -349,8 +450,14 @@ def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
         torch.cuda.empty_cache()
 
     out_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}.mp4")
-    num_frames = _pass2_render_video(record, out_path, res=res,
-                                      render_every=render_every)
+    pov_rgb_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}_pov_rgb.mp4") if record_pov else None
+    pov_depth_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}_pov_depth.mp4") if record_pov else None
+
+    num_frames = _pass2_render_video(
+        record, out_path, res=res, render_every=render_every,
+        pov_rgb_path=pov_rgb_path, pov_depth_path=pov_depth_path,
+        pov_res=pov_res,
+    )
     if num_frames == 0:
         return None, record["outcome"], record["final_dist"], 0
     return out_path, record["outcome"], record["final_dist"], num_frames
@@ -374,7 +481,11 @@ def main():
     parser.add_argument("--render-every", type=int, default=1,
                         help="Capture every Nth physics substep (default: 1 = all)")
     parser.add_argument("--res", type=str, default="1920x1080",
-                        help="Video resolution WxH (default: 1920x1080)")
+                        help="Third-person video resolution WxH (default: 1920x1080)")
+    parser.add_argument("--pov-res", type=str, default="480x480",
+                        help="Drone-POV video resolution WxH (default: 480x480)")
+    parser.add_argument("--no-pov", action="store_true",
+                        help="Skip drone-POV RGB+depth videos (default: also record them)")
     parser.add_argument("--no-obstacles", action="store_true",
                         help="Hide all obstacles (curriculum Phase 1). Default is strategic placement.")
     parser.add_argument("--placement", choices=["strategic", "vineyard"], default=None,
@@ -382,12 +493,16 @@ def main():
                              "Default: use whatever cfgs.pkl specifies.")
     args = parser.parse_args()
 
-    try:
-        w_str, h_str = args.res.lower().split("x")
-        res = (int(w_str), int(h_str))
-    except ValueError:
-        print(f"Invalid --res '{args.res}'; expected format WxH (e.g. 1920x1080)")
-        sys.exit(1)
+    def _parse_wxh(s, label):
+        try:
+            w_str, h_str = s.lower().split("x")
+            return (int(w_str), int(h_str))
+        except ValueError:
+            print(f"Invalid --{label} '{s}'; expected format WxH (e.g. 1920x1080)")
+            sys.exit(1)
+
+    res = _parse_wxh(args.res, "res")
+    pov_res = _parse_wxh(args.pov_res, "pov-res")
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
 
@@ -422,7 +537,9 @@ def main():
     print(f"  Env        : {'v2' if is_v2 else 'v1'}")
     print(f"  Seed       : {args.seed}")
     print(f"  Render     : every {args.render_every} substep(s)")
-    print(f"  Resolution : {res[0]}x{res[1]}")
+    print(f"  3rd-person : {res[0]}x{res[1]}")
+    if not args.no_pov:
+        print(f"  POV        : {pov_res[0]}x{pov_res[1]} (RGB + depth)")
 
     # Eval overrides
     reward_cfg["reward_scales"] = {}
@@ -432,6 +549,7 @@ def main():
         EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
         log_dir, ckpt_iter, seed=args.seed, render_every=args.render_every,
         res=res, no_obstacles=args.no_obstacles,
+        record_pov=not args.no_pov, pov_res=pov_res,
     )
 
     if result[0] is None:
@@ -440,10 +558,14 @@ def main():
 
     out_path, outcome, final_dist, num_frames = result
     print(f"\n{'='*48}")
-    print(f"  Outcome      : {outcome}")
-    print(f"  Final dist   : {final_dist:.3f} m")
-    print(f"  Frames       : {num_frames}")
-    print(f"  Video saved  : {out_path}")
+    print(f"  Outcome         : {outcome}")
+    print(f"  Final dist      : {final_dist:.3f} m")
+    print(f"  Frames          : {num_frames}")
+    print(f"  3rd-person MP4  : {out_path}")
+    if not args.no_pov:
+        base = out_path[:-len(".mp4")]
+        print(f"  POV RGB MP4     : {base}_pov_rgb.mp4")
+        print(f"  POV depth MP4   : {base}_pov_depth.mp4")
     print(f"{'='*48}")
 
 
