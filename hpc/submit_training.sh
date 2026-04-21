@@ -122,6 +122,13 @@ BATCH="$REPLY"
 ask "Max iterations" "$DEF_ITERS"
 ITERS="$REPLY"
 
+# Curriculum iterations only supported by obstacle_avoidance/train_rl_wb.py
+CURRICULUM_ITERS="0"
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    ask "Curriculum iters" "300"
+    CURRICULUM_ITERS="$REPLY"
+fi
+
 # Adaptive LR only supported by obstacle_avoidance/train_rl_wb.py currently
 ADAPTIVE_LR="false"
 DESIRED_KL="0.01"
@@ -183,6 +190,9 @@ fi
 if [ "$SCENARIO" = "hard" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --scenario hard"
 fi
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --curriculum-iterations ${CURRICULUM_ITERS}"
+fi
 if [ "$ADAPTIVE_LR" = "true" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --adaptive-lr --desired-kl ${DESIRED_KL}"
 fi
@@ -207,6 +217,9 @@ info "Time limit" "${HOURS}h"
 echo ""
 info "Batch size" "$BATCH envs"
 info "Iterations" "$ITERS"
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    info "Curriculum iters" "$CURRICULUM_ITERS"
+fi
 if [ "$ADAPTIVE_LR" = "true" ]; then
     info "LR schedule" "adaptive (KL target ${DESIRED_KL})"
 else

@@ -111,7 +111,7 @@ def get_cfgs(env_v2=False):
         "target_x_range": [-5.0, 5.0],
         "target_y_range": [-5.0, 5.0],
         "target_z_range": [1.0, 1.0],
-        # Obstacle curriculum disabled — obstacles present from step 0
+        # Overwritten by --curriculum-iterations in main() (default 300 iters)
         "curriculum_steps": 0,
         "curriculum_n_obstacles": 5,
         # Success: within radius of target for the entire decision step
@@ -234,6 +234,9 @@ def main():
     parser.add_argument("--scenario", choices=["default", "hard"], default="default",
                         help="Training scenario preset. 'hard' overrides spawn + placement "
                              "(10 m ring spawn, 5-10 m altitude, 4-row vineyard, 3 m cubes).")
+    parser.add_argument("--curriculum-iterations", type=int, default=300,
+                        help="Iterations of obstacles-hidden curriculum phase. Converted "
+                             "internally to env steps via num_steps_per_env. Set 0 to disable.")
     parser.add_argument("--adaptive-lr", action="store_true",
                         help="Enable rsl-rl adaptive KL-based LR schedule (default: fixed LR)")
     parser.add_argument("--desired-kl", type=float, default=0.01,
@@ -267,6 +270,10 @@ def main():
     # Scenario presets (override placement + spawn settings as a bundle).
     if args.scenario == "hard":
         _apply_hard_scenario(env_cfg)
+
+    env_cfg["curriculum_steps"] = (
+        args.curriculum_iterations * train_cfg["num_steps_per_env"]
+    )
 
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, train_cfg],
