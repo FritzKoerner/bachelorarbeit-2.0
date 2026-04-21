@@ -111,8 +111,8 @@ def get_cfgs(env_v2=False):
         "target_x_range": [-5.0, 5.0],
         "target_y_range": [-5.0, 5.0],
         "target_z_range": [1.0, 1.0],
-        # Obstacle curriculum: no obstacles for first N steps, then strategic placement
-        "curriculum_steps": 10000,  # 500 iters × 20 steps_per_env
+        # Obstacle curriculum disabled — obstacles present from step 0
+        "curriculum_steps": 0,
         "curriculum_n_obstacles": 5,
         # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,

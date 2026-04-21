@@ -103,9 +103,6 @@ BATCH="$REPLY"
 ask "Max iterations" "$DEF_ITERS"
 ITERS="$REPLY"
 
-ask "Seed" "0"
-SEED="$REPLY"
-
 # Adaptive LR only supported by obstacle_avoidance/train_rl_wb.py currently
 ADAPTIVE_LR="false"
 DESIRED_KL="0.01"
@@ -161,9 +158,6 @@ TRAIN_SCRIPT="train_rl_wb.py"
 
 # Build training command args
 TRAIN_ARGS="-e ${EXP_NAME} -B ${BATCH} --max_iterations ${ITERS}"
-if [ "$SEED" != "0" ]; then
-    TRAIN_ARGS="${TRAIN_ARGS} --seed ${SEED}"
-fi
 if [ "$ENV_VERSION" = "v2" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --env-v2"
 fi
@@ -188,7 +182,6 @@ info "Time limit" "${HOURS}h"
 echo ""
 info "Batch size" "$BATCH envs"
 info "Iterations" "$ITERS"
-info "Seed" "$SEED"
 if [ "$ADAPTIVE_LR" = "true" ]; then
     info "LR schedule" "adaptive (KL target ${DESIRED_KL})"
 else
@@ -235,7 +228,7 @@ export VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
 cd ${PROTO_DIR}
 echo "=== Starting training: \$(date) ==="
 echo "Host: \$(hostname), GPU: \$(nvidia-smi --query-gpu=name --format=csv,noheader)"
-echo "Experiment: ${EXP_NAME}, Seed: ${SEED}"
+echo "Experiment: ${EXP_NAME}"
 
 python ${TRAIN_SCRIPT} ${TRAIN_ARGS}
 
