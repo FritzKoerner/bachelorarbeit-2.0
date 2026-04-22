@@ -308,10 +308,23 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
 
     ctx = scene.visualizer.context
 
-    # Replay loop.
-    frames = []
-    pov_rgb_frames = []
-    pov_depth_frames = []
+    # Clamp raised to 120 so render_every=1 gives real-time 100 fps playback
+    # (dt=0.01 -> physics_fps=100). The old 50-cap made episodes play 2x slow.
+    physics_fps = 1.0 / dt
+    fps = min(120.0, max(10.0, physics_fps / render_every))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
+    # Stream frames directly to the encoders: a 60 s episode with decimation=300
+    # is ~6000 substeps, which at 1920x1080x3 uint8 would otherwise pin ~37 GB
+    # of frames in RAM (plus ~8 GB for POV RGB+depth at 480x480). That is what
+    # killed HPC jobs via the SLURM --mem oom_kill. Writers are lazily opened
+    # on the first frame so we can keep using actual rendered shape (which
+    # differs from `res` when env_separate_rigid returns batched arrays).
+    writer = None
+    pov_rgb_writer = None
+    pov_depth_writer = None
+
+    num_frames = 0
     trail_positions = []
     last_drawn_idx = 0
     trail_interval = max(1, 50 // render_every)
@@ -345,10 +358,30 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
                 pov_rgb = pov_rgb.cpu().numpy()
             if pov_rgb.ndim == 4:
                 pov_rgb = pov_rgb[0]
+
+            # POV frames are rotated 90 deg CW so "up" in the video matches
+            # the drone's body-up axis; the 45 deg downward look otherwise
+            # produces a sideways-feeling FPV. Rotation swaps width/height
+            # in the encoder's expected dims.
             if pov_rgb_path is not None:
-                pov_rgb_frames.append(pov_rgb)
+                rot_rgb = cv2.rotate(pov_rgb, cv2.ROTATE_90_CLOCKWISE)
+                if pov_rgb_writer is None:
+                    rh, rw = rot_rgb.shape[:2]
+                    pov_rgb_writer = cv2.VideoWriter(
+                        pov_rgb_path, fourcc, fps, (rw, rh),
+                    )
+                pov_rgb_writer.write(cv2.cvtColor(rot_rgb, cv2.COLOR_RGB2BGR))
+
             if pov_depth_path is not None:
-                pov_depth_frames.append(_depth_to_viridis_uint8(pov_depth, max_depth))
+                # _depth_to_viridis_uint8 already returns BGR uint8.
+                depth_bgr = _depth_to_viridis_uint8(pov_depth, max_depth)
+                rot_depth = cv2.rotate(depth_bgr, cv2.ROTATE_90_CLOCKWISE)
+                if pov_depth_writer is None:
+                    rh, rw = rot_depth.shape[:2]
+                    pov_depth_writer = cv2.VideoWriter(
+                        pov_depth_path, fourcc, fps, (rw, rh),
+                    )
+                pov_depth_writer.write(rot_depth)
 
         # Incremental trail update (only affects the third-person view).
         trail_positions.append(positions[t])
@@ -368,9 +401,16 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
         # env_separate_rigid may return a batched (1, H, W, C) array.
         if rgb.ndim == 4:
             rgb = rgb[0]
-        frames.append(rgb)
 
-    # Final trail segment.
+        if writer is None:
+            h, w = rgb.shape[:2]
+            writer = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+        writer.write(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        num_frames += 1
+
+    # Final trail segment (visualized only on the third-person cam; does not
+    # retroactively affect already-written frames, kept for parity with prior
+    # behavior of flushing the tail to the debug context).
     n = len(trail_positions)
     if n > last_drawn_idx + 1:
         new_pts = np.array(trail_positions[last_drawn_idx:n])
@@ -382,43 +422,14 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
 
     ctx.clear_debug_objects()
 
-    if not frames:
-        return 0
+    if writer is not None:
+        writer.release()
+    if pov_rgb_writer is not None:
+        pov_rgb_writer.release()
+    if pov_depth_writer is not None:
+        pov_depth_writer.release()
 
-    # Clamp raised to 120 so render_every=1 gives real-time 100 fps playback
-    # (dt=0.01 -> physics_fps=100). The old 50-cap made episodes play 2x slow.
-    physics_fps = 1.0 / dt
-    fps = min(120.0, max(10.0, physics_fps / render_every))
-
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-
-    h, w = frames[0].shape[:2]
-    writer = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
-    for frame in frames:
-        writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-    writer.release()
-
-    # POV frames are written rotated 90 deg CW so "up" in the video matches
-    # the drone's body-up axis. Genesis cameras combined with our 45 deg
-    # downward look direction otherwise yield a sideways-feeling FPV.
-    # Rotation swaps width and height in the encoder's expected dims.
-    if pov_rgb_path is not None and pov_rgb_frames:
-        src_h, src_w = pov_rgb_frames[0].shape[:2]
-        w_pov_rgb = cv2.VideoWriter(pov_rgb_path, fourcc, fps, (src_h, src_w))
-        for frame in pov_rgb_frames:
-            rot = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-            w_pov_rgb.write(cv2.cvtColor(rot, cv2.COLOR_RGB2BGR))
-        w_pov_rgb.release()
-
-    if pov_depth_path is not None and pov_depth_frames:
-        src_h, src_w = pov_depth_frames[0].shape[:2]
-        # _depth_to_viridis_uint8 already returns BGR uint8 -- write as-is.
-        w_pov_depth = cv2.VideoWriter(pov_depth_path, fourcc, fps, (src_h, src_w))
-        for frame in pov_depth_frames:
-            w_pov_depth.write(cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE))
-        w_pov_depth.release()
-
-    return len(frames)
+    return num_frames
 
 
 # ---------------------------------------------------------------------------

@@ -114,7 +114,18 @@ def record_landing(env_cfg, obs_cfg, reward_cfg, train_cfg,
     obs = render_env.reset()
     ctx = render_env.scene.visualizer.context
 
-    frames = []
+    # Encoder params computed upfront so the capture closure can open the
+    # VideoWriter lazily on the first frame. Previously this loop accumulated
+    # every rendered frame into a Python list and only encoded at the end;
+    # for a 60 s / decimation=300 episode that's ~6000 substeps * 960x540x3
+    # uint8 = ~8.9 GB in RAM, which can OOM SLURM eval jobs with tight --mem.
+    out_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}.mp4")
+    physics_fps = 1.0 / render_env.dt
+    fps = min(50.0, max(10.0, physics_fps / render_every))
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+
+    writer_cell = [None]  # lazy-init inside closure; list-cell for mutability
+    num_frames = [0]
     substep_count = [0]
     trail_positions = [render_env.drone.get_pos()[0].cpu().numpy().copy()]
     last_drawn_idx = [0]
@@ -140,7 +151,12 @@ def record_landing(env_cfg, obs_cfg, reward_cfg, train_cfg,
         rgb, _, _, _ = cam.render()
         if isinstance(rgb, torch.Tensor):
             rgb = rgb.cpu().numpy()
-        frames.append(rgb)
+
+        if writer_cell[0] is None:
+            h, w = rgb.shape[:2]
+            writer_cell[0] = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+        writer_cell[0].write(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        num_frames[0] += 1
 
     with torch.no_grad():
         for step_i in range(max_steps):
@@ -163,23 +179,12 @@ def record_landing(env_cfg, obs_cfg, reward_cfg, train_cfg,
 
     ctx.clear_debug_objects()
 
-    # Save as MP4
-    if not frames:
+    if writer_cell[0] is None:
         print("No frames captured!")
-        return None, outcome
+        return None, outcome, final_dist, 0
 
-    out_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}.mp4")
-    physics_fps = 1.0 / render_env.dt
-    fps = min(50.0, max(10.0, physics_fps / render_every))
-
-    h, w = frames[0].shape[:2]
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
-    for frame in frames:
-        writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-    writer.release()
-
-    return out_path, outcome, final_dist, len(frames)
+    writer_cell[0].release()
+    return out_path, outcome, final_dist, num_frames[0]
 
 
 # ---------------------------------------------------------------------------
