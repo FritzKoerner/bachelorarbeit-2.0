@@ -223,6 +223,13 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
     cam_pos, lookat = _compute_camera_framing(
         positions, target_pos, obstacle_positions, fov=fov,
     )
+    # Genesis Rasterizer default is far=20, which clips obstacles on the far
+    # side of the bbox when the camera is offset ~10-20 m from center. Pin
+    # far to (3x cam-to-center distance, min 100 m) so nothing is culled.
+    cam_center_dist = float(np.linalg.norm(
+        np.asarray(cam_pos) - np.asarray(lookat)
+    ))
+    rec_far = max(cam_center_dist * 3.0, 100.0)
 
     # Minimal scene: no collision, no gravity -- we never step physics.
     scene = gs.Scene(
@@ -282,6 +289,7 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
 
     rec_cam = scene.add_camera(
         res=res, pos=cam_pos, lookat=lookat, fov=fov, GUI=False,
+        far=rec_far,
     )
 
     record_pov = pov_rgb_path is not None or pov_depth_path is not None

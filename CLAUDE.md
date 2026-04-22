@@ -65,6 +65,7 @@ Conda environment: `ba_v04`. Key packages: `genesis-world==0.4.3` (installs `qua
 - **`env_separate_rigid=True` render output is batched** `(n_envs, H, W, C)` for rgb and `(n_envs, H, W)` for depth — slice `[0]` / check `ndim==4` before feeding to cv2/PIL/numpy viz code.
 - **Viewer mode (`-v`) crashes on window close**: closing the GUI mid-run raises `GenesisException` from `viewer.update()` and kills training. Dev-only — HPC must run headless.
 - **v0.4.4+ latent breakage (we're pinned to 0.4.3)**: `set_quat` default flips to `relative=True` (6 call sites across env files assume absolute), and `set_propellels_rpm` was renamed to `set_propellers_rpm` with no alias. Both need explicit fixes before any `genesis-world` bump.
+- **`scene.add_camera` defaults `far=20.0`** (Rasterizer near/far plane). Any scene wider than ~15 m from the camera will silently clip distant geometry. Pass `far=max(cam_to_center * 3, 100.0)` or similar for wide-field third-person views. (POV cams mirroring the CNN's depth camera should keep the small default to match the CNN's `max_depth` clamp.)
 
 ## Architecture
 
