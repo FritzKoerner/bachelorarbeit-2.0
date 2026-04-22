@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cmd=$(jq -r '.tool_input.command // \"\"'); if echo \"$cmd\" | grep -qE '(sync_(to|from)_hpc|submit_(training|evaluation|training_multigpu)|run_interactive|continue_training)\\.sh|(rsync|scp|ssh)[[:space:]][^&|;]*fk67rahe'; then echo 'Blocked by .claude/settings.json: HPC operations (sync/submit/ssh) are user-managed per CLAUDE.md Forbidden Actions. Claude may Edit/Read these scripts but must never execute them.' >&2; exit 2; fi; exit 0"
+            "command": "cmd=$(jq -r '.tool_input.command // \"\"'); if echo \"$cmd\" | grep -qE '(^|[[:space:]]|[;&|])(\\./|bash[[:space:]]+|sh[[:space:]]+|zsh[[:space:]]+|source[[:space:]]+|\\.[[:space:]]+)([^[:space:];|&]*/)?(sync_(to|from)_hpc|submit_(training|evaluation|training_multigpu)|run_interactive|continue_training)\\.sh'; then echo 'Blocked: direct execution of HPC script per CLAUDE.md Forbidden Actions. Read/edit/commit/grep are allowed; only ./, bash, sh, zsh, source, and . are blocked. If this is a false positive, refactor to avoid invoking the script.' >&2; exit 2; fi; if echo \"$cmd\" | grep -qE '(^|[[:space:]]|[;&|])(rsync|scp|ssh)[[:space:]][^&|;]*fk67rahe'; then echo 'Blocked: direct rsync/scp/ssh to HPC cluster per CLAUDE.md Forbidden Actions.' >&2; exit 2; fi; exit 0"
           }
         ]
       }

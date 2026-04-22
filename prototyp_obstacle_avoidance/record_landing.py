@@ -437,14 +437,18 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
 # ---------------------------------------------------------------------------
 
 def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
-                   log_dir, ckpt, seed=42, render_every=1, res=(1920, 1080),
-                   no_obstacles=False, record_pov=True, pov_res=(480, 480)):
+                   log_dir, eval_dir, ckpt, seed=42, render_every=1,
+                   res=(1920, 1080), no_obstacles=False, record_pov=True,
+                   pov_res=(480, 480)):
     """Record one landing episode and save as MP4(s).
 
     Pass 1 runs the policy in the real env to record the trajectory.
     Pass 2 replays that trajectory in a minimal scene and renders:
       - third-person video (always)
       - drone-POV RGB + viridis-depth videos (when record_pov=True)
+
+    ``log_dir`` is where the checkpoint lives; ``eval_dir`` is where MP4s
+    are written (usually ``{log_dir}/evals/{run_name}/``).
 
     Returns (out_path, outcome, final_dist, num_frames). The POV side outputs
     are written next to out_path with `_pov_rgb` / `_pov_depth` suffixes.
@@ -460,9 +464,9 @@ def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    out_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}.mp4")
-    pov_rgb_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}_pov_rgb.mp4") if record_pov else None
-    pov_depth_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}_pov_depth.mp4") if record_pov else None
+    out_path = os.path.join(eval_dir, f"landing_ckpt_{ckpt}.mp4")
+    pov_rgb_path = os.path.join(eval_dir, f"landing_ckpt_{ckpt}_pov_rgb.mp4") if record_pov else None
+    pov_depth_path = os.path.join(eval_dir, f"landing_ckpt_{ckpt}_pov_depth.mp4") if record_pov else None
 
     num_frames = _pass2_render_video(
         record, out_path, res=res, render_every=render_every,
@@ -502,6 +506,10 @@ def main():
     parser.add_argument("--placement", choices=["strategic", "vineyard"], default=None,
                         help="Override placement strategy regardless of how the model was trained. "
                              "Default: use whatever cfgs.pkl specifies.")
+    parser.add_argument("--name", type=str, default=None,
+                        help="Name for this eval run. Videos land in "
+                             "logs/{exp}/evals/{name}/landing_ckpt_{ckpt}*.mp4. "
+                             "Default: iter{ckpt}.")
     args = parser.parse_args()
 
     def _parse_wxh(s, label):
@@ -543,9 +551,15 @@ def main():
     is_v2 = "progress" in reward_cfg.get("reward_scales", {})
     EnvClass = ObstacleAvoidanceEnvV2 if is_v2 else ObstacleAvoidanceEnv
 
+    # Eval run identity and artifact directory.
+    run_name = args.name or f"iter{ckpt_iter}"
+    eval_dir = os.path.join(log_dir, "evals", run_name)
+    os.makedirs(eval_dir, exist_ok=True)
+
     print(f"Recording landing video ...")
     print(f"  Checkpoint : {resume_path}  (iteration {ckpt_iter})")
     print(f"  Env        : {'v2' if is_v2 else 'v1'}")
+    print(f"  Run name   : {run_name}")
     print(f"  Seed       : {args.seed}")
     print(f"  Render     : every {args.render_every} substep(s)")
     print(f"  3rd-person : {res[0]}x{res[1]}")
@@ -558,7 +572,8 @@ def main():
 
     result = record_landing(
         EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
-        log_dir, ckpt_iter, seed=args.seed, render_every=args.render_every,
+        log_dir, eval_dir, ckpt_iter,
+        seed=args.seed, render_every=args.render_every,
         res=res, no_obstacles=args.no_obstacles,
         record_pov=not args.no_pov, pov_res=pov_res,
     )

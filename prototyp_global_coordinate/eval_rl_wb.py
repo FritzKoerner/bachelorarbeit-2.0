@@ -16,6 +16,7 @@ import wandb
 from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 from envs.coordinate_landing_env import CoordinateLandingEnv
+from envs.coordinate_landing_env_v2 import CoordinateLandingEnvV2
 from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl
 
 
@@ -281,7 +282,13 @@ def main():
                         help="Checkpoint iteration (default: latest)")
     parser.add_argument("--num_envs",         type=int, default=50)
     parser.add_argument("--num_episodes",     type=int, default=100)
-    parser.add_argument("--wandb_project",    type=str, default="drone-continuous")
+    parser.add_argument("--wandb_project",    type=str, default=None,
+                        help="W&B project override. Default: eval-drone-continuous-v{1|2} "
+                             "auto-derived from the checkpoint's env version.")
+    parser.add_argument("--name",             type=str, default=None,
+                        help="Name for this eval run. Drives W&B run display name and "
+                             "the artifact subdirectory logs/{exp}/evals/{name}/. "
+                             "Default: iter{ckpt}.")
     parser.add_argument("--vis", action="store_true",
                         help="Viewer mode: 1 env, 10 episodes, no W&B logging")
     args = parser.parse_args()
@@ -306,6 +313,19 @@ def main():
         resume_path, ckpt_iter = find_latest_checkpoint(log_dir)
     print(f"Loading checkpoint: {resume_path}  (iteration {ckpt_iter})")
 
+    # Detect env version from saved reward keys BEFORE clearing them.
+    is_v2 = "progress" in reward_cfg.get("reward_scales", {})
+    env_version = "v2" if is_v2 else "v1"
+    EnvClass = CoordinateLandingEnvV2 if is_v2 else CoordinateLandingEnv
+
+    # Eval run identity and artifact directory.
+    run_name = args.name or f"iter{ckpt_iter}"
+    eval_dir = os.path.join(log_dir, "evals", run_name)
+    os.makedirs(eval_dir, exist_ok=True)
+
+    # Resolve W&B project -- per-prototype, per-env-version eval namespace.
+    wandb_project = args.wandb_project or f"eval-drone-continuous-{env_version}"
+
     # Eval-time overrides
     reward_cfg["reward_scales"] = {}
     env_cfg["curriculum_steps"] = 0
@@ -319,7 +339,7 @@ def main():
         num_envs    = args.num_envs
         show_viewer = False
 
-    env = CoordinateLandingEnv(
+    env = EnvClass(
         num_envs=num_envs,
         env_cfg=env_cfg,
         obs_cfg=obs_cfg,
@@ -363,20 +383,21 @@ def main():
         stats = print_stats(results)
         fig = make_plots(results)
 
-        # Save plot locally
-        plot_path = os.path.join(log_dir, "eval_stats.png")
+        # Save plot into the per-run eval subdirectory.
+        plot_path = os.path.join(eval_dir, "eval_stats.png")
         fig.savefig(plot_path, dpi=150, bbox_inches="tight")
         print(f"Plot saved -> {plot_path}")
 
         # Log to W&B
-        run_name = f"{args.exp_name}-eval-iter{ckpt_iter}"
         wandb.init(
-            project=args.wandb_project,
+            project=wandb_project,
             name=run_name,
             job_type="eval",
+            tags=[f"ckpt-{ckpt_iter}", env_version, args.exp_name],
             config={
                 "exp_name": args.exp_name,
                 "checkpoint": ckpt_iter,
+                "env_version": env_version,
                 "num_episodes": args.num_episodes,
                 "env_cfg": dict(env_cfg),
                 "obs_cfg": obs_cfg,
@@ -384,7 +405,7 @@ def main():
         )
         log_to_wandb(results, stats, fig, ckpt_iter)
         wandb.finish()
-        print(f"W&B eval run logged: {run_name}")
+        print(f"W&B eval run logged: {wandb_project} / {run_name}")
 
         plt.close(fig)
 

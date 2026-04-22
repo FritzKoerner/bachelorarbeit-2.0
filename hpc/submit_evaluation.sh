@@ -108,6 +108,17 @@ ask "Iteration (empty=latest)" ""
 CKPT="$REPLY"
 
 # ╔══════════════════════════════════════╗
+# ║  3b. Eval run name                   ║
+# ╚══════════════════════════════════════╝
+# Optional: label this eval run. Empty -> script defaults to iter{ckpt}.
+# Artifacts land in logs/{exp}/evals/{NAME or iter{ckpt}}/.
+section "Eval Run Name"
+echo -e "   ${DIM}Labels the W&B run and scopes artifacts to logs/{exp}/evals/{name}/.${RESET}"
+echo -e "   ${DIM}Empty -> default 'iter{ckpt}' (reruns on same ckpt overwrite).${RESET}"
+ask "Name (optional)" ""
+NAME="$REPLY"
+
+# ╔══════════════════════════════════════╗
 # ║  4. Eval mode                        ║
 # ╚══════════════════════════════════════╝
 section "Eval Mode"
@@ -210,6 +221,9 @@ if [ "$EVAL_MODE" != "video" ]; then
     if [ -n "$CKPT" ]; then
         EVAL_ARGS="${EVAL_ARGS} --ckpt ${CKPT}"
     fi
+    if [ -n "$NAME" ]; then
+        EVAL_ARGS="${EVAL_ARGS} --name ${NAME}"
+    fi
     if [ "$USE_OBSTACLES" = "false" ]; then
         EVAL_ARGS="${EVAL_ARGS} --no-obstacles"
     fi
@@ -225,6 +239,9 @@ if [ "$EVAL_MODE" != "eval" ]; then
     VIDEO_ARGS="-e ${EXP_NAME} --seed ${VIDEO_SEED}"
     if [ -n "$CKPT" ]; then
         VIDEO_ARGS="${VIDEO_ARGS} --ckpt ${CKPT}"
+    fi
+    if [ -n "$NAME" ]; then
+        VIDEO_ARGS="${VIDEO_ARGS} --name ${NAME}"
     fi
     if [ "$USE_OBSTACLES" = "false" ]; then
         VIDEO_ARGS="${VIDEO_ARGS} --no-obstacles"
@@ -249,6 +266,7 @@ section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
 info "Experiment" "$EXP_NAME"
 info "Checkpoint" "${CKPT:-latest}"
+info "Run name" "${NAME:-iter${CKPT:-<latest>}}"
 if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
     if [ "$USE_OBSTACLES" = "true" ]; then
         info "Obstacles" "${PLACEMENT:-inherit from cfgs.pkl}"
@@ -354,9 +372,12 @@ spin_run "Submitting to SLURM..." sbatch "${LOG_DIR}/${JOB_NAME}.sh"
 done_banner "Job submitted: ${JOB_NAME}"
 hint "Monitor with: squeue -u \$USER"
 hint "Logs: ${LOG_DIR}/slurm-<jobid>.out"
+# Artifacts now land in a per-run subdir. If NAME is empty the Python scripts
+# fall back to iter{ckpt}, which the hints mirror here for the same CKPT value.
+EFFECTIVE_NAME="${NAME:-iter${CKPT:-<latest>}}"
 if [ "$EVAL_MODE" != "video" ]; then
-    hint "Eval results: ${PROTO_DIR}/logs/${EXP_NAME}/eval_stats.png"
+    hint "Eval results: ${PROTO_DIR}/logs/${EXP_NAME}/evals/${EFFECTIVE_NAME}/eval_stats.png"
 fi
 if [ "$EVAL_MODE" != "eval" ]; then
-    hint "Landing video: ${PROTO_DIR}/logs/${EXP_NAME}/landing_ckpt_${CKPT:-latest}.mp4"
+    hint "Landing video: ${PROTO_DIR}/logs/${EXP_NAME}/evals/${EFFECTIVE_NAME}/landing_ckpt_${CKPT:-latest}.mp4"
 fi

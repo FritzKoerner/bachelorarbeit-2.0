@@ -27,6 +27,7 @@ import torch
 from rsl_rl.runners import OnPolicyRunner
 import genesis as gs
 from envs.coordinate_landing_env import CoordinateLandingEnv
+from envs.coordinate_landing_env_v2 import CoordinateLandingEnvV2
 from eval_rl_wb import find_latest_checkpoint, resolve_hpc_log_dir
 from train_rl_wb import DictConfig  # needed to unpickle cfgs.pkl
 from visualize_paths import _add_camera, _build_path_mesh
@@ -36,13 +37,17 @@ from visualize_paths import _add_camera, _build_path_mesh
 # Video recording (two-pass: dry run for framing, replay for capture)
 # ---------------------------------------------------------------------------
 
-def record_landing(env_cfg, obs_cfg, reward_cfg, train_cfg,
-                   log_dir, ckpt, seed=42, render_every=1, res=(960, 540)):
+def record_landing(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
+                   log_dir, eval_dir, ckpt, seed=42, render_every=1,
+                   res=(960, 540)):
     """Record one landing episode and save as MP4.
 
     Pass 1 runs the full episode to determine the trajectory and compute
     optimal camera framing.  Pass 2 replays with the same seed, capturing
     a frame every ``render_every`` physics substeps via substep_callback.
+
+    ``log_dir`` is where the checkpoint lives; ``eval_dir`` is where the
+    MP4 is written (usually ``{log_dir}/evals/{run_name}/``).
 
     Returns (out_path, outcome, final_dist, num_frames).
     """
@@ -50,7 +55,7 @@ def record_landing(env_cfg, obs_cfg, reward_cfg, train_cfg,
     cfg["visualize_target"] = True
     cfg["curriculum_steps"] = 0
 
-    render_env = CoordinateLandingEnv(
+    render_env = EnvClass(
         num_envs=1, env_cfg=cfg, obs_cfg=obs_cfg,
         reward_cfg=copy.deepcopy(reward_cfg), show_viewer=False,
     )
@@ -119,7 +124,7 @@ def record_landing(env_cfg, obs_cfg, reward_cfg, train_cfg,
     # every rendered frame into a Python list and only encoded at the end;
     # for a 60 s / decimation=300 episode that's ~6000 substeps * 960x540x3
     # uint8 = ~8.9 GB in RAM, which can OOM SLURM eval jobs with tight --mem.
-    out_path = os.path.join(log_dir, f"landing_ckpt_{ckpt}.mp4")
+    out_path = os.path.join(eval_dir, f"landing_ckpt_{ckpt}.mp4")
     physics_fps = 1.0 / render_env.dt
     fps = min(50.0, max(10.0, physics_fps / render_every))
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -204,6 +209,10 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--render-every", type=int, default=1,
                         help="Capture every Nth physics substep (default: 1 = all)")
+    parser.add_argument("--name", type=str, default=None,
+                        help="Name for this eval run. Video lands in "
+                             "logs/{exp}/evals/{name}/landing_ckpt_{ckpt}.mp4. "
+                             "Default: iter{ckpt}.")
     args = parser.parse_args()
 
     gs.init(backend=gs.gpu, precision="32", logging_level="warning")
@@ -230,8 +239,19 @@ def main():
     else:
         resume_path, ckpt_iter = find_latest_checkpoint(log_dir)
 
+    # Detect env version from saved reward keys BEFORE clearing them.
+    is_v2 = "progress" in reward_cfg.get("reward_scales", {})
+    EnvClass = CoordinateLandingEnvV2 if is_v2 else CoordinateLandingEnv
+
+    # Eval run identity and artifact directory.
+    run_name = args.name or f"iter{ckpt_iter}"
+    eval_dir = os.path.join(log_dir, "evals", run_name)
+    os.makedirs(eval_dir, exist_ok=True)
+
     print(f"Recording landing video ...")
     print(f"  Checkpoint : {resume_path}  (iteration {ckpt_iter})")
+    print(f"  Env        : {'v2' if is_v2 else 'v1'}")
+    print(f"  Run name   : {run_name}")
     print(f"  Seed       : {args.seed}")
     print(f"  Render     : every {args.render_every} substep(s)")
 
@@ -239,8 +259,9 @@ def main():
     reward_cfg["reward_scales"] = {}
 
     result = record_landing(
-        env_cfg, obs_cfg, reward_cfg, train_cfg,
-        log_dir, ckpt_iter, seed=args.seed, render_every=args.render_every,
+        EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
+        log_dir, eval_dir, ckpt_iter,
+        seed=args.seed, render_every=args.render_every,
     )
 
     if result[0] is None:
