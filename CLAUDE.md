@@ -33,6 +33,9 @@ python eval_rl_wb.py
 python visualize_paths.py --ckpt 100 300                  # matplotlib + screenshots
 python visualize_paths.py --ckpt 300 --video              # + landing GIF with trail
 python visualize_paths.py --ckpt 100 300 --no_render      # matplotlib only
+
+# Record landing MP4 for HPC-back visual check
+python record_landing.py --ckpt 300
 ```
 
 ## Dependencies
@@ -53,6 +56,11 @@ Conda environment: `ba_v04`. Key packages: `genesis-world==0.4.3` (installs `qua
 - **`gs.morphs.Box` with `fixed=True`**: supports per-env `set_pos(new_pos, envs_idx=idx, zero_velocity=True)` for obstacle randomization. Use `collision=False` when handling collisions via distance checks.
 - **BatchRenderer** requires Turing+ GPU (compute capability >= 7.5). Crashes with `abort()` on Volta — check capability before use. Fallback: Rasterizer with `env_separate_rigid=True`.
 - **Rasterizer** does NOT support batched cameras. Use `env_separate_rigid=True` which renders all envs in one `render()` call. Known depth bug: `depth[i]` for i>0 shows env 0's rigid bodies — workaround in `_render_depth_rasterizer()` swaps env 0 positions per render.
+- **BatchRenderer requires uniform camera resolution** — all cameras in one scene must share the same `res`, else `scene.build()` raises. Multi-res recordings need separate scenes (see `prototyp_obstacle_avoidance/record_landing.py` two-pass design).
+- **Post-build camera addition**: `scene.add_camera()` is `@assert_not_built`-gated. Workaround: `scene._visualizer.add_camera()` adds a pyrender-only node (Rasterizer only, not BatchRenderer-compatible). Pattern: `visualize_paths.py:_add_camera`.
+- **`env_separate_rigid=True` render output is batched** `(n_envs, H, W, C)` for rgb and `(n_envs, H, W)` for depth — slice `[0]` / check `ndim==4` before feeding to cv2/PIL/numpy viz code.
+- **Viewer mode (`-v`) crashes on window close**: closing the GUI mid-run raises `GenesisException` from `viewer.update()` and kills training. Dev-only — HPC must run headless.
+- **v0.4.4+ latent breakage (we're pinned to 0.4.3)**: `set_quat` default flips to `relative=True` (6 call sites across env files assume absolute), and `set_propellels_rpm` was renamed to `set_propellers_rpm` with no alias. Both need explicit fixes before any `genesis-world` bump.
 
 ## Architecture
 
@@ -121,7 +129,12 @@ python eval_rl_wb.py --vis                                  # single visual epis
 # Visualization
 python visualize_paths.py --ckpt 100 300 --no_render
 python visualize_paths.py --ckpt 300 --video
+
+# Record landing MP4s (3rd-person + POV RGB + POV depth) for HPC-back visual check
+python record_landing.py --ckpt 300 [--no-pov] [--placement strategic|vineyard] [--no-obstacles]
 ```
+
+`train_rl_multigpu.py` is parked — currently unused, kept on disk for a possible future multi-GPU revival. Do not list it as a first-class command; its `CUDA_VISIBLE_DEVICES` remap workaround is self-documented at the top of the script.
 
 ## prototyp_obstacle_avoidance Architecture
 
@@ -143,6 +156,8 @@ Key files (mirrors `prototyp_global_coordinate/` structure):
 **Rewards (v1)**: distance (+5, delta: prev_dist − curr_dist), time (-0.5), obstacle_proximity (-6), crash (-100, includes obstacle collision), success (+200). Per-step rewards scaled by dt.
 
 **Rewards (v2)**: progress (+5, delta-distance), close (+1, exp(-dist)), obstacle_proximity (-6), crash (-100), success (+200). No dt-scaling, no time penalty.
+
+**Video recording (`record_landing.py`)**: two-scene design (policy scene + viz scene) because BatchRenderer forbids mixed resolutions. Pass 2 streams each rendered frame directly to `cv2.VideoWriter` (lazy-init on first frame) — never accumulate into a list. A default 60 s / decimation=300 episode is ~6000 `substep_callback` fires × full-res frames; buffering them all OOM-kills SLURM jobs with tight `--mem`.
 
 ## Running on HPC (Leipzig cluster)
 

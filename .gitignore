@@ -16,3 +16,4 @@ debug_depth_output/
 .firecrawl/
 .planning/
 hpc_results/
+.claude/settings.local.json
