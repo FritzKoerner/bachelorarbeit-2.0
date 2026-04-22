@@ -134,26 +134,45 @@ def _pass1_record_trajectory(EnvClass, env_cfg, obs_cfg, reward_cfg, train_cfg,
 # Pass 2 -- replay trajectory in a viz-only scene with a single high-res cam
 # ---------------------------------------------------------------------------
 
-def _compute_camera_framing(positions, target_pos, obstacle_positions, fov=90):
-    """Frame the camera so the full trajectory + obstacles + target are visible."""
-    all_points = np.vstack([
-        positions, target_pos.reshape(1, 3), obstacle_positions,
-    ])
-    bbox_min = all_points.min(axis=0)
-    bbox_max = all_points.max(axis=0)
-    center = (bbox_min + bbox_max) / 2.0
-    extent = float(np.linalg.norm(bbox_max - bbox_min))
+_CAM_DISTANCE_M = 15.0       # horizontal distance from target (user request)
+_CAM_HEIGHT_M = 5.0          # camera altitude (above ground, not relative to target)
+_CAM_LOOKAT_ABOVE_TARGET = 5.0  # lookat is this far above target_z; tilts optical axis up
+                                # ~3.8 deg so target appears ~62% below image center at fov=60
 
-    padding = 1.4
-    dist = (extent * padding) / (2.0 * math.tan(math.radians(fov / 2.0)))
-    dist = max(dist, 2.0)
+
+def _compute_camera_framing(positions, target_pos):
+    """Fixed side view of the landing.
+
+    Camera sits perpendicular to the horizontal spawn->target line at
+    ``_CAM_DISTANCE_M`` metres from the target, at ``_CAM_HEIGHT_M`` altitude,
+    looking ``_CAM_LOOKAT_ABOVE_TARGET`` metres above the target. This puts
+    the target near image bottom-center and the drone's full 1-10 m altitude
+    range comfortably inside the vertical FOV (when paired with fov_v=60).
+
+    Returns (cam_pos, lookat) as tuples of Python floats.
+    """
+    target_pos = np.asarray(target_pos, dtype=np.float64)
+    start_xy = np.asarray(positions[0], dtype=np.float64)[:2]
+    approach = target_pos[:2] - start_xy
+    norm = np.linalg.norm(approach)
+    if norm < 1e-3:
+        # Drone spawned on top of the target -- pick an arbitrary horizontal axis.
+        approach_xy = np.array([1.0, 0.0])
+    else:
+        approach_xy = approach / norm
+    # Perpendicular in horizontal plane (rotate 90 deg CCW viewed from +Z).
+    perp_xy = np.array([-approach_xy[1], approach_xy[0]])
 
     cam_pos = (
-        float(center[0] + dist * 0.15),
-        float(center[1] - dist * 0.75),
-        float(center[2] + dist * 0.55),
+        float(target_pos[0] + perp_xy[0] * _CAM_DISTANCE_M),
+        float(target_pos[1] + perp_xy[1] * _CAM_DISTANCE_M),
+        float(_CAM_HEIGHT_M),
     )
-    lookat = tuple(float(c) for c in center)
+    lookat = (
+        float(target_pos[0]),
+        float(target_pos[1]),
+        float(target_pos[2] + _CAM_LOOKAT_ABOVE_TARGET),
+    )
     return cam_pos, lookat
 
 
@@ -219,17 +238,16 @@ def _pass2_render_video(record, out_path, res=(1920, 1080), render_every=1,
     dt = record["dt"]
     max_depth = record.get("max_depth", 20.0)
 
-    fov = 90
-    cam_pos, lookat = _compute_camera_framing(
-        positions, target_pos, obstacle_positions, fov=fov,
-    )
-    # Genesis Rasterizer default is far=20, which clips obstacles on the far
-    # side of the bbox when the camera is offset ~10-20 m from center. Pin
-    # far to (3x cam-to-center distance, min 100 m) so nothing is culled.
-    cam_center_dist = float(np.linalg.norm(
-        np.asarray(cam_pos) - np.asarray(lookat)
-    ))
-    rec_far = max(cam_center_dist * 3.0, 100.0)
+    # Vertical FOV (Genesis interprets `fov` as the vertical FOV). 60 deg
+    # gives ~91 deg horizontal at 16:9, which cleanly frames the spawn ring
+    # (drone ~10 m altitude, +/- 5 m offset) while keeping the scene at a
+    # natural zoom level.
+    fov = 60
+    cam_pos, lookat = _compute_camera_framing(positions, target_pos)
+    # Genesis Rasterizer default is far=20, which would cull obstacles on the
+    # spawn side of the target. Scene is fully contained within ~30 m of the
+    # camera; pin far to 100 m with headroom so nothing is ever clipped.
+    rec_far = 100.0
 
     # Minimal scene: no collision, no gravity -- we never step physics.
     scene = gs.Scene(
