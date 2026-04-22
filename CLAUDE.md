@@ -36,6 +36,10 @@ python visualize_paths.py --ckpt 100 300 --no_render      # matplotlib only
 
 # Record landing MP4 for HPC-back visual check
 python record_landing.py --ckpt 300
+
+# Eval with a custom run label (artifacts land in logs/{exp}/evals/{name}/)
+python eval_rl_wb.py --ckpt 300 --name baseline-seed42
+python record_landing.py --ckpt 300 --name baseline-seed42
 ```
 
 ## Dependencies
@@ -103,6 +107,17 @@ Key files in `prototyp_global_coordinate/`:
 
 `curriculum_steps` counts `env.step()` calls, not runner iterations. Formula: `curriculum_steps = target_iteration × num_steps_per_env`. Changing `num_steps_per_env` shifts the curriculum transition point.
 
+## Eval W&B convention
+
+Eval runs live in their own per-prototype, per-env-version W&B projects — separate from training — so eval dashboards don't mix with training noise:
+
+- `eval-drone-continuous-v{1|2}` (global_coordinate)
+- `eval-obstacle-avoidance-v{1|2}` (obstacle_avoidance)
+
+Env version is auto-detected from `cfgs.pkl` reward keys (`"progress"` in `reward_scales` → v2). `--wandb_project` still works as an explicit override.
+
+`eval_rl_wb.py` and `record_landing.py` both accept `--name <custom>`. All artifacts (`eval_stats.png`, `landing_ckpt_{ckpt}*.mp4`) land in `logs/{exp}/evals/{name}/`. Default `--name` is `iter{ckpt}` — reruns on the same ckpt overwrite, so use `--name` to compare protocols (e.g. `--name baseline-hard`, `--name vineyard-seed7`).
+
 ## V2 Env Pattern
 
 - Adding a new env version: create `envs/*_v2.py`, update `train_rl_wb.py` (import, `get_cfgs(env_v2=)`, `--env-v2` flag, env class selection), update `eval_rl_wb.py` (detect from `cfgs.pkl` reward keys).
@@ -132,6 +147,10 @@ python visualize_paths.py --ckpt 300 --video
 
 # Record landing MP4s (3rd-person + POV RGB + POV depth) for HPC-back visual check
 python record_landing.py --ckpt 300 [--no-pov] [--placement strategic|vineyard] [--no-obstacles]
+
+# Eval with a custom run label (artifacts land in logs/{exp}/evals/{name}/)
+python eval_rl_wb.py --ckpt 300 --name baseline-hard
+python record_landing.py --ckpt 300 --name baseline-hard
 ```
 
 `train_rl_multigpu.py` is parked — currently unused, kept on disk for a possible future multi-GPU revival. Do not list it as a first-class command; its `CUDA_VISIBLE_DEVICES` remap workaround is self-documented at the top of the script.
