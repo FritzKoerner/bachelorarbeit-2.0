@@ -154,9 +154,14 @@ echo -e "   ${SYM_CHECK} Checkpoint: ${GREEN}model_${RESUME_ITER}.pt${RESET}"
 # ╚══════════════════════════════════════╝
 section "Run Configuration"
 
-# Auto-detect env version from cfgs.pkl
+# Auto-detect env version + placement strategy (+ hard-scenario fingerprint) from cfgs.pkl.
+# Fingerprint logic mirrors train_rl_wb.py::_apply_hard_scenario so we can distinguish
+# a plain `--placement vineyard` run from a full `--scenario hard` bundle and restore
+# the correct CLI flag on resume.
 CFGS_FILE="${RUN_DIR}/cfgs.pkl"
 ENV_VERSION="v1"
+DETECTED_PLACEMENT="strategic"
+DETECTED_SCENARIO="default"
 
 if [ -f "$CFGS_FILE" ]; then
     DETECT_RESULT=$(python3 -c "
@@ -174,17 +179,38 @@ try:
     cfgs = pickle.load(open('$CFGS_FILE', 'rb'))
     env_cfg, obs_cfg, reward_cfg, train_cfg = cfgs
     scales = reward_cfg.get('reward_scales', {})
-    print('v2' if 'progress' in scales else 'v1')
+    env_ver = 'v2' if 'progress' in scales else 'v1'
+    placement = env_cfg.get('placement_strategy', 'strategic')
+    # Hard-scenario fingerprint: must match the bundle in _apply_hard_scenario.
+    # Coerce via `or 0.0` because legacy cfgs store None for spawn_ring_radius
+    # (not a missing key), which would TypeError on the >= comparison.
+    obs_size = env_cfg.get('obstacle_size') or [1.0, 1.0, 2.0]
+    is_hard = (
+        placement == 'vineyard'
+        and (env_cfg.get('spawn_ring_radius') or 0.0) >= 10.0
+        and (env_cfg.get('vineyard_n_rows') or 0) == 4
+        and (env_cfg.get('spawn_height_max') or 0.0) >= 10.0
+        and len(obs_size) >= 1 and float(obs_size[0]) >= 3.0
+    )
+    scenario = 'hard' if is_hard else 'default'
+    print(f'{env_ver}|{placement}|{scenario}')
 except Exception:
-    print('v1')
-" 2>/dev/null || echo "v1")
+    print('v1|strategic|default')
+" 2>/dev/null || echo "v1|strategic|default")
 
     if [ -n "$DETECT_RESULT" ]; then
-        ENV_VERSION="$DETECT_RESULT"
+        ENV_VERSION="$(echo "$DETECT_RESULT" | cut -d'|' -f1)"
+        DETECTED_PLACEMENT="$(echo "$DETECT_RESULT" | cut -d'|' -f2)"
+        DETECTED_SCENARIO="$(echo "$DETECT_RESULT" | cut -d'|' -f3)"
     fi
 fi
 
 info "Env version" "$ENV_VERSION"
+if [ "$DETECTED_SCENARIO" = "hard" ]; then
+    info "Placement" "vineyard (scenario=hard)"
+else
+    info "Placement" "$DETECTED_PLACEMENT"
+fi
 
 # ╔══════════════════════════════════════╗
 # ║  4. Training parameters              ║
@@ -297,6 +323,14 @@ TRAIN_ARGS="-e ${EFFECTIVE_RUN_NAME} -B ${BATCH} --max_iterations ${MAX_ITERS} -
 if [ "$ENV_VERSION" = "v2" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --env-v2"
 fi
+# Preserve the original obstacle-placement bundle — train_rl_wb.py rewrites env_cfg
+# from defaults on every launch, so without this the resumed run silently reverts to
+# --placement strategic regardless of how the checkpoint was trained.
+if [ "$DETECTED_SCENARIO" = "hard" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --scenario hard"
+elif [ "$DETECTED_PLACEMENT" != "strategic" ]; then
+    TRAIN_ARGS="${TRAIN_ARGS} --placement ${DETECTED_PLACEMENT}"
+fi
 if [ "$ADAPTIVE_LR" = "true" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --adaptive-lr --desired-kl ${DESIRED_KL}"
 fi
@@ -317,6 +351,11 @@ fi
 info "Resume from" "iteration ${RESUME_ITER}"
 info "Train to" "iteration ${MAX_ITERS} (+${ADDITIONAL})"
 info "Env version" "$ENV_VERSION"
+if [ "$DETECTED_SCENARIO" = "hard" ]; then
+    info "Placement" "vineyard (scenario=hard, detected)"
+else
+    info "Placement" "$DETECTED_PLACEMENT (detected)"
+fi
 if [ "$ADAPTIVE_LR" = "true" ]; then
     info "Adaptive LR" "enabled (desired_kl=${DESIRED_KL})"
 fi
