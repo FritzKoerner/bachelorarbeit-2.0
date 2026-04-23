@@ -10,7 +10,7 @@ Migrated from v0.3.13 — see the original repo at `../genesis/` for history and
 
 - **prototyp_global_coordinate/** — Global coordinate-based landing with cascading PID controller. Uses PPO via rsl-rl.
 - **prototyp_obstacle_avoidance/** — CNN depth-map obstacle avoidance. Extends global_coordinate with random obstacles, downward-facing depth camera, and rsl-rl v5.0.1 `CNNModel` + `share_cnn_encoders`.
-- **prototyp_corridor_navigation/** — Forked from obstacle_avoidance env v2. Fixed-axis corridor slalom along +X with mixed-shape obstacles (2 boxes, 2 spheres, 2 cylinders, 2 pillar cylinders). Hard termination on leaving the corridor bounding box; no v1/v2 split, no strategic/vineyard placers.
+- **prototyp_corridor_navigation/** — Forked from obstacle_avoidance env v2. Fixed-axis corridor slalom along +X with mixed-shape obstacles (2 boxes, 2 spheres, 2 cylinders, 2 pillar cylinders) and physical boundary walls + ceiling that the depth camera perceives. No v1/v2 split, no strategic/vineyard placers.
 - **assets/** — Shared drone URDF + meshes (`assets/robots/draugas/`). Referenced from prototypes as `../assets/`.
 - **hpc/** — HPC Leipzig cluster scripts: env setup, code sync, SLURM job submission.
 
@@ -193,23 +193,27 @@ python train_rl_wb.py -B 4 -v --max_iterations 5
 
 # Smoke test with curriculum disabled (obstacles visible from step 0)
 python train_rl_wb.py -B 4 -v --max_iterations 5 --curriculum-iterations 0
+
+# Visualise the placement strategy (pure numpy+matplotlib, no Genesis build)
+# Emits per-sample top-down + side views and a 10 k-sample stats block.
+python visualize_obstacle_setup.py
 ```
 
-Eval/record/visualize scripts are not yet ported from `prototyp_obstacle_avoidance/`; add them once training is stable and `cfgs.pkl` format has settled.
+Eval/record scripts are not yet ported from `prototyp_obstacle_avoidance/`; add them once training is stable and `cfgs.pkl` format has settled. `visualize_obstacle_setup.py` is a numpy twin of `_place_obstacles_corridor` — if the env's placement formula changes, mirror it there too.
 
 ## prototyp_corridor_navigation Architecture
 
 Fixed-axis corridor slalom along +X. Single env class (`CorridorNavigationEnv`), no v1/v2 split. State/action/depth/observation scales identical to `prototyp_obstacle_avoidance` env v2.
 
-**Corridor geometry (metres)**: X `[0.0, 13.0]`, Y `[-3.0, 3.0]`, Z `[0.3, 6.0]`. Spawn uniform in X `[0.5, 5.5]` × Y `[-2.5, 2.5]` at Z `5.0`. Target fixed at `(12.0, 0.0, 1.0)`. Leaving the bounding box terminates the episode (contributes to both `crash` and `out_of_corridor` reward components — the latter is logged separately for diagnosis).
+**Corridor geometry (metres)**: X `[0.0, 32.0]`, Y `[-4.0, 4.0]`, Z `[0.0, 6.0]`. Spawn uniform in X `[0.5, 2.5]` × Y `[-2.5, 2.5]` at Z `4.0`. Target fixed at `(30.0, 0.0, 1.0)`. Left/right walls at y=±4.1 and ceiling at z=6.1 are **physical box entities** (indices 8-10 in `self.obstacles`, flagged `is_wall=True`) visible to the depth camera; ground plane at z=0 handles the floor. Drone crashes on wall-contact (collision check at radius 0.3 m) at y=±3.7 / z=5.7 before reaching the numeric bounds; `out_of_corridor` termination is retained as a safety net and still logged separately.
 
-**Obstacle mix (8 total)**: 2 Boxes, 2 Spheres, 2 Cylinders, 2 thin-tall pillar Cylinders. Sizes configurable via `env_cfg` keys `corridor_{box_sizes, sphere_radii, cylinder_specs, pillar_specs}`. Placed in 4 X-slices (centres `[3.5, 6.0, 8.5, 11.0]`), 2 per slice on opposite Y sides with a guaranteed ≥ 2.5 m Y-gap so the drone always has a feasible path. Shape-interleaved layout gives each slice a different shape pair.
+**Obstacle mix (11 total: 8 random + 3 walls)**: random obstacles are 2 Boxes, 2 Spheres, 2 Cylinders, 2 thin-tall pillar Cylinders, shape-interleaved across pairs (Box+Sphere and Cyl+Pillar alternate). Sizes configurable via `env_cfg` keys `corridor_{box_sizes, sphere_radii, cylinder_specs, pillar_specs}`. Placed in 4 X-slices (centres `[10.0, 14.0, 18.0, 22.0]`) as **pair-straddling slaloms**: per slice/env the placement draws axis ∈ {Y, Z} (forced to Y when the pair contains a pillar), side ∈ {-1, +1}, distance `d ∈ [0, 3]` m from the spawn→target line, and face-to-face gap ∈ `[1, 2]` m. Formula: `A_along = line_along + side·d`, `B_along = A_along − side·(A_half + gap + B_half)`, so the face-to-face gap between the pair is always exactly `gap` regardless of shape sizes. Walls are fixed (never moved by the placement loop or curriculum).
 
-**Shape-aware collision**: `_compute_obstacle_distances()` computes per-shape distances (box AABB / sphere radial / cylinder radial+axial) for every obstacle and dispatches via `torch.where` on `self.obstacle_shape_type`. Fully vectorised across the `n_obs` axis — no Python loop per obstacle.
+**Shape-aware collision**: `_compute_obstacle_distances()` computes per-shape distances (box AABB / sphere radial / cylinder radial+axial) for every obstacle and dispatches via `torch.where` on `self.obstacle_shape_type`. Fully vectorised across the `n_obs` axis (now 11) — no Python loop per obstacle. Walls participate like any other box obstacle.
 
-**Reward scales**: `progress +0.5`, `close +0.1`, `obstacle_proximity -0.6`, `crash -10.0`, `success +20.0`, `out_of_corridor -10.0` (same magnitude as `crash`, same sign convention, logged separately).
+**Reward scales**: `progress +0.5`, `close +0.1`, `obstacle_proximity -0.6` (safety_radius 1.5 m, applies to all 11 obstacles including walls/ceiling), `crash -10.0`, `success +20.0`, `out_of_corridor -10.0`. Proximity penalty was tuned down (was 3.0 m) so walls don't flood the signal — at spawn (z=4, |y|≤2.5), the drone is ≥1.5 m from every wall/ceiling surface, so spawn itself triggers zero proximity penalty.
 
-**Curriculum**: identical to obstacle_avoidance — obstacles stay underground (`z = -100`) until `global_step >= curriculum_steps`. Corridor bounds are enforced from step 0, so the agent learns to stay in the box even during curriculum warm-up.
+**Curriculum**: random obstacles (indices 0-7) stay underground (`z = -100`) until `global_step >= curriculum_steps`; walls and ceiling (indices 8-10, `is_wall=True`) remain in place from step 0 so the drone learns corridor boundaries visually during warm-up. The `out_of_corridor` termination is also enforced from step 0 as a safety net.
 
 ## Running on HPC (Leipzig cluster)
 
