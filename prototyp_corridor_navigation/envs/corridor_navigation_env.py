@@ -115,13 +115,13 @@ class CorridorNavigationEnv:
         for i in range(2):
             bx = self.box_sizes[i]
             self._obstacle_specs.append(
-                dict(morph="box", size=bx, shape_type=_SHAPE_BOX, z_rest=bx[2] / 2.0)
+                dict(morph="box", size=bx, shape_type=_SHAPE_BOX, z_rest=bx[2] / 2.0, is_pillar=False)
             )
             sr = float(self.sphere_radii_cfg[i])
             # Sphere sits on corridor floor (z = 0.3), not the global ground,
             # so its centre is lifted by 0.3 to avoid half-burying small radii.
             self._obstacle_specs.append(
-                dict(morph="sphere", radius=sr, shape_type=_SHAPE_SPHERE, z_rest=sr + 0.3)
+                dict(morph="sphere", radius=sr, shape_type=_SHAPE_SPHERE, z_rest=sr + 0.3, is_pillar=False)
             )
             cr, ch = self.cylinder_specs_cfg[i]
             self._obstacle_specs.append(
@@ -131,6 +131,7 @@ class CorridorNavigationEnv:
                     height=float(ch),
                     shape_type=_SHAPE_CYLINDER,
                     z_rest=float(ch) / 2.0,
+                    is_pillar=False,
                 )
             )
             pr, ph = self.pillar_specs_cfg[i]
@@ -141,6 +142,7 @@ class CorridorNavigationEnv:
                     height=float(ph),
                     shape_type=_SHAPE_CYLINDER,
                     z_rest=float(ph) / 2.0,
+                    is_pillar=True,
                 )
             )
         self.num_obstacles = len(self._obstacle_specs)  # 8
@@ -170,8 +172,19 @@ class CorridorNavigationEnv:
         self.line_end = torch.tensor(
             self.target_pos_val, device=gs.device, dtype=gs.tc_float
         )
-        self.pair_sep_min = float(env_cfg["corridor_pair_separation_min"])
-        self.pair_sep_max = float(env_cfg["corridor_pair_separation_max"])
+        self.pair_gap_min = float(env_cfg["corridor_pair_gap_min"])
+        self.pair_gap_max = float(env_cfg["corridor_pair_gap_max"])
+        self.first_offset_min = float(env_cfg["corridor_first_obstacle_offset_min"])
+        self.first_offset_max = float(env_cfg["corridor_first_obstacle_offset_max"])
+
+        # Per-slice pillar flag — when True, pair placement is locked to Y-axis
+        # because pillars (height ~4 m) cannot fit vertical detours in a 5.7 m corridor.
+        n_slices = len(self.slice_centres)
+        self._pair_has_pillar = [
+            bool(self._obstacle_specs[2 * s].get("is_pillar", False)
+                 or self._obstacle_specs[2 * s + 1].get("is_pillar", False))
+            for s in range(n_slices)
+        ]
 
         # Depth camera params
         self.depth_res = obs_cfg.get("depth_res", 64)
@@ -205,7 +218,7 @@ class CorridorNavigationEnv:
                 max_FPS=60,
                 # Diagonal top-corner view so the full corridor is visible in -v mode.
                 camera_pos=(-4.0, -6.0, 8.0),
-                camera_lookat=(6.5, 0.0, 2.0),
+                camera_lookat=(16.0, 0.0, 2.0),
                 camera_fov=60,
             ),
             rigid_options=gs.options.RigidOptions(
@@ -501,13 +514,24 @@ class CorridorNavigationEnv:
     # ------------------------------------------------------------------
 
     def _place_obstacles_corridor(self, envs_idx, n):
-        """Place 8 obstacles in 4 X-slices as line-anchored pairs.
+        """Place 8 obstacles in 4 X-slices as pair-straddling slaloms.
 
-        Per slice: obstacle A sits on the spawn->target line (same Y/Z as the
-        descending trajectory at its X); obstacle B is offset 1-2 m from A in
-        either ±Y or ±Z, sampled per-env.  This forces a detour (horizontal or
-        vertical) at every slice, since the naive straight-line path now
-        crosses an obstacle blob rather than the old Y=0 corridor centre.
+        Per slice, per env:
+          axis ~ Uniform{Y, Z}        (forced to Y when the pair contains a pillar)
+          side ~ Uniform{-1, +1}
+          d    ~ Uniform[first_offset_min, first_offset_max]
+          gap  ~ Uniform[pair_gap_min, pair_gap_max]
+
+        Obstacle A sits at `line_along(X) + side * d` along the chosen axis.
+        Obstacle B sits on the other side of A with exactly `gap` metres
+        between their facing surfaces, computed via
+
+            B_along = A_along - side * (A_half + gap + B_half).
+
+        On the non-chosen perpendicular axis both obstacles sit on the
+        spawn->target line at that X. No corridor clamping is applied:
+        obstacles may poke through the bounding-box walls; the drone's
+        out-of-corridor termination still fires if the drone itself leaves.
         """
         x_jitter_mag = 0.2
 
@@ -515,43 +539,53 @@ class CorridorNavigationEnv:
         line_end = self.line_end
         line_len_x = line_end[0] - line_start[0]
 
-        y_lo, y_hi = self.corridor_y_range
-        z_lo, z_hi = self.corridor_z_range
-
         for slice_i, x_centre in enumerate(self.slice_centres):
             idx_a = 2 * slice_i
             idx_b = 2 * slice_i + 1
 
-            # --- Obstacle A: on the spawn->target line at sampled X. ---
+            # Independent X jitter for A and B so the pair doesn't look glued.
             x_a = torch.full((n,), x_centre, device=gs.device, dtype=gs.tc_float) \
                 + gs_rand_float(-x_jitter_mag, x_jitter_mag, (n,), gs.device)
-            t = (x_a - line_start[0]) / line_len_x  # (n,)
-            y_a_line = line_start[1] + t * (line_end[1] - line_start[1])
-            z_a_line = line_start[2] + t * (line_end[2] - line_start[2])
-            z_half_a = self._obstacle_z_half(idx_a)
-            z_a = z_a_line.clamp(z_lo + z_half_a, z_hi - z_half_a)
-            pos_a = torch.stack([x_a, y_a_line, z_a], dim=-1)
+            x_b = torch.full((n,), x_centre, device=gs.device, dtype=gs.tc_float) \
+                + gs_rand_float(-x_jitter_mag, x_jitter_mag, (n,), gs.device)
 
-            # --- Per-env detour axis (0=Y, 1=Z) and sign (±1). ---
-            axis = torch.randint(0, 2, (n,), device=gs.device)
+            # Spawn->target line Y/Z at this X: reference for both the
+            # non-chosen axis (obstacles pass through the line) and the
+            # chosen axis (zero-offset origin for the `side * d` offset).
+            t = (x_a - line_start[0]) / line_len_x
+            y_line = line_start[1] + t * (line_end[1] - line_start[1])
+            z_line = line_start[2] + t * (line_end[2] - line_start[2])
+
+            # Axis choice: pillars can't fit vertical detours in a ~5.7 m corridor.
+            if self._pair_has_pillar[slice_i]:
+                axis = torch.zeros((n,), device=gs.device, dtype=torch.long)
+            else:
+                axis = torch.randint(0, 2, (n,), device=gs.device)
+
             sign = torch.where(
                 torch.randint(0, 2, (n,), device=gs.device) == 0,
                 torch.full((n,), -1.0, device=gs.device, dtype=gs.tc_float),
                 torch.full((n,), 1.0, device=gs.device, dtype=gs.tc_float),
             )
-            mag = gs_rand_float(self.pair_sep_min, self.pair_sep_max, (n,), gs.device)
-            delta_y = torch.where(axis == 0, sign * mag, torch.zeros_like(mag))
-            delta_z = torch.where(axis == 1, sign * mag, torch.zeros_like(mag))
+            d = gs_rand_float(self.first_offset_min, self.first_offset_max, (n,), gs.device)
+            gap = gs_rand_float(self.pair_gap_min, self.pair_gap_max, (n,), gs.device)
 
-            # --- Obstacle B: offset from A in chosen axis, clamped to corridor. ---
-            x_b = torch.full((n,), x_centre, device=gs.device, dtype=gs.tc_float) \
-                + gs_rand_float(-x_jitter_mag, x_jitter_mag, (n,), gs.device)
-            y_b_raw = y_a_line + delta_y
-            z_b_raw = z_a + delta_z
+            y_half_a = self._obstacle_y_half(idx_a)
             y_half_b = self._obstacle_y_half(idx_b)
+            z_half_a = self._obstacle_z_half(idx_a)
             z_half_b = self._obstacle_z_half(idx_b)
-            y_b = y_b_raw.clamp(y_lo + y_half_b, y_hi - y_half_b)
-            z_b = z_b_raw.clamp(z_lo + z_half_b, z_hi - z_half_b)
+
+            # A: line + side * d along the chosen axis; line on the other axis.
+            y_a = torch.where(axis == 0, y_line + sign * d, y_line)
+            z_a = torch.where(axis == 1, z_line + sign * d, z_line)
+
+            # B: A - side * (A_half + gap + B_half) along the chosen axis.
+            delta_y_ab = sign * (y_half_a + gap + y_half_b)
+            delta_z_ab = sign * (z_half_a + gap + z_half_b)
+            y_b = torch.where(axis == 0, y_a - delta_y_ab, y_line)
+            z_b = torch.where(axis == 1, z_a - delta_z_ab, z_line)
+
+            pos_a = torch.stack([x_a, y_a, z_a], dim=-1)
             pos_b = torch.stack([x_b, y_b, z_b], dim=-1)
 
             self.obstacles[idx_a].set_pos(pos_a, envs_idx=envs_idx, zero_velocity=True)
