@@ -65,6 +65,7 @@ python train_rl_wb.py -B 4 --max_iterations 5
 ssh hpc
 sbatch ~/genesis_v04/hpc/jobs/train_global_coord.job
 sbatch ~/genesis_v04/hpc/jobs/train_obstacle_avoidance.job
+sbatch ~/genesis_v04/hpc/jobs/train_corridor_navigation.job
 ```
 
 **Option B: Interactive submission wrapper** (prompts for prototype, env version, batch size, partition, etc.):
@@ -151,3 +152,5 @@ Results land in `hpc_results/` at repo root.
 | global_coordinate | V100 (32GB) | 4096 |
 | obstacle_avoidance | A30 (24GB) | 512 |
 | obstacle_avoidance | V100 (32GB) | 512-1024 |
+| corridor_navigation | A30 (24GB) | 256 |
+| corridor_navigation | V100 (32GB) | 256-512 |

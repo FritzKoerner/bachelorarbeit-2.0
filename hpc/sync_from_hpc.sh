@@ -6,6 +6,7 @@
 #   ./sync_from_hpc.sh                          # sync all prototype logs
 #   ./sync_from_hpc.sh global_coordinate        # sync specific prototype
 #   ./sync_from_hpc.sh obstacle_avoidance       # sync specific prototype
+#   ./sync_from_hpc.sh corridor_navigation      # sync specific prototype
 #   ./sync_from_hpc.sh --dry-run                # preview only
 # ==============================================================================
 
@@ -99,7 +100,7 @@ PROTOS=()
 if [ -n "$PROTOTYPE" ]; then
     PROTOS=("$PROTOTYPE")
 else
-    PROTOS=(global_coordinate obstacle_avoidance)
+    PROTOS=(global_coordinate obstacle_avoidance corridor_navigation)
 fi
 
 TOTAL_STEPS=$(( ${#PROTOS[@]} + 1 ))   # +1 for SLURM logs

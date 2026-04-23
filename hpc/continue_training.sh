@@ -1,9 +1,12 @@
 #!/bin/bash
 # ==============================================================================
-# Interactive SLURM job submission for continuing obstacle avoidance training
+# Interactive SLURM job submission for continuing CNN-depth RL training
 #
-# Scans existing training runs, lets you pick one and a checkpoint, then
-# submits a SLURM job that resumes from that point.
+# Supports obstacle_avoidance and corridor_navigation prototypes. Scans existing
+# training runs, lets you pick one and a checkpoint, then submits a SLURM job
+# that resumes from that point. Env-version / placement / hard-scenario auto-
+# detection runs only for obstacle_avoidance; corridor_navigation has a single
+# placement strategy so resume is a plain --resume without extra flags.
 #
 # Usage:
 #   ./continue_training.sh              # fully interactive
@@ -40,10 +43,23 @@ ask_yn() {
 banner "Continue Training Job" "$MAGENTA"
 
 # ╔══════════════════════════════════════╗
+# ║  0. Prototype selection              ║
+# ╚══════════════════════════════════════╝
+section "Prototype"
+echo -e "   ${WHITE}1)${RESET} obstacle_avoidance"
+echo -e "   ${WHITE}2)${RESET} corridor_navigation"
+printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
+read -r proto_choice
+case "${proto_choice:-1}" in
+    2) PROTOTYPE="corridor_navigation" ;;
+    *) PROTOTYPE="obstacle_avoidance" ;;
+esac
+
+# ╔══════════════════════════════════════╗
 # ║  Paths                               ║
 # ╚══════════════════════════════════════╝
 GENESIS_DIR="$HOME/genesis_v04"
-PROTO_DIR="${GENESIS_DIR}/prototyp_obstacle_avoidance"
+PROTO_DIR="${GENESIS_DIR}/prototyp_${PROTOTYPE}"
 LOGS_DIR="${PROTO_DIR}/logs"
 SLURM_LOG_DIR="${GENESIS_DIR}/logs"
 
@@ -157,13 +173,14 @@ section "Run Configuration"
 # Auto-detect env version + placement strategy (+ hard-scenario fingerprint) from cfgs.pkl.
 # Fingerprint logic mirrors train_rl_wb.py::_apply_hard_scenario so we can distinguish
 # a plain `--placement vineyard` run from a full `--scenario hard` bundle and restore
-# the correct CLI flag on resume.
+# the correct CLI flag on resume. This is all obstacle_avoidance-specific;
+# corridor_navigation has a single placement strategy so detection is skipped.
 CFGS_FILE="${RUN_DIR}/cfgs.pkl"
 ENV_VERSION="v1"
 DETECTED_PLACEMENT="strategic"
 DETECTED_SCENARIO="default"
 
-if [ -f "$CFGS_FILE" ]; then
+if [ "$PROTOTYPE" = "obstacle_avoidance" ] && [ -f "$CFGS_FILE" ]; then
     DETECT_RESULT=$(python3 -c "
 import pickle, types, sys
 
@@ -205,11 +222,15 @@ except Exception:
     fi
 fi
 
-info "Env version" "$ENV_VERSION"
-if [ "$DETECTED_SCENARIO" = "hard" ]; then
-    info "Placement" "vineyard (scenario=hard)"
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    info "Env version" "$ENV_VERSION"
+    if [ "$DETECTED_SCENARIO" = "hard" ]; then
+        info "Placement" "vineyard (scenario=hard)"
+    else
+        info "Placement" "$DETECTED_PLACEMENT"
+    fi
 else
-    info "Placement" "$DETECTED_PLACEMENT"
+    info "Env version" "n/a (single-version prototype)"
 fi
 
 # ╔══════════════════════════════════════╗
@@ -350,11 +371,13 @@ if [ "$EFFECTIVE_RUN_NAME" != "$RUN_NAME" ]; then
 fi
 info "Resume from" "iteration ${RESUME_ITER}"
 info "Train to" "iteration ${MAX_ITERS} (+${ADDITIONAL})"
-info "Env version" "$ENV_VERSION"
-if [ "$DETECTED_SCENARIO" = "hard" ]; then
-    info "Placement" "vineyard (scenario=hard, detected)"
-else
-    info "Placement" "$DETECTED_PLACEMENT (detected)"
+if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
+    info "Env version" "$ENV_VERSION"
+    if [ "$DETECTED_SCENARIO" = "hard" ]; then
+        info "Placement" "vineyard (scenario=hard, detected)"
+    else
+        info "Placement" "$DETECTED_PLACEMENT (detected)"
+    fi
 fi
 if [ "$ADAPTIVE_LR" = "true" ]; then
     info "Adaptive LR" "enabled (desired_kl=${DESIRED_KL})"

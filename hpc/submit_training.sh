@@ -49,26 +49,31 @@ banner "Submit Training Job" "$MAGENTA"
 section "Prototype"
 echo -e "   ${WHITE}1)${RESET} global_coordinate"
 echo -e "   ${WHITE}2)${RESET} obstacle_avoidance"
+echo -e "   ${WHITE}3)${RESET} corridor_navigation"
 printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
 read -r proto_choice
 case "${proto_choice:-1}" in
     2) PROTOTYPE="obstacle_avoidance" ;;
+    3) PROTOTYPE="corridor_navigation" ;;
     *) PROTOTYPE="global_coordinate" ;;
 esac
 
 # ╔══════════════════════════════════════╗
 # ║  1b. Env version                     ║
 # ╚══════════════════════════════════════╝
+# corridor_navigation has no v1/v2 split — single placement strategy.
 ENV_VERSION="v1"
-section "Env Version"
-echo -e "   ${WHITE}1)${RESET} v1  (distance + time penalties)"
-echo -e "   ${WHITE}2)${RESET} v2  (progress + close rewards, no dt-scaling)"
-printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
-read -r version_choice
-case "${version_choice:-1}" in
-    2) ENV_VERSION="v2" ;;
-    *) ENV_VERSION="v1" ;;
-esac
+if [ "$PROTOTYPE" != "corridor_navigation" ]; then
+    section "Env Version"
+    echo -e "   ${WHITE}1)${RESET} v1  (distance + time penalties)"
+    echo -e "   ${WHITE}2)${RESET} v2  (progress + close rewards, no dt-scaling)"
+    printf "   ${DIM}%-20s${RESET}${CYAN}[1]${RESET}: " "Select"
+    read -r version_choice
+    case "${version_choice:-1}" in
+        2) ENV_VERSION="v2" ;;
+        *) ENV_VERSION="v1" ;;
+    esac
+fi
 
 # ╔══════════════════════════════════════╗
 # ║  1c. Scenario (obstacle_avoidance)   ║
@@ -88,7 +93,7 @@ fi
 
 # --- Per-prototype defaults ---
 case "$PROTOTYPE" in
-    obstacle_avoidance)
+    obstacle_avoidance | corridor_navigation)
         DEF_BATCH=256
         DEF_ITERS=8001
         ;;
@@ -122,24 +127,28 @@ BATCH="$REPLY"
 ask "Max iterations" "$DEF_ITERS"
 ITERS="$REPLY"
 
-# Curriculum iterations only supported by obstacle_avoidance/train_rl_wb.py
+# Curriculum iterations supported by obstacle_avoidance + corridor_navigation
 CURRICULUM_ITERS="0"
-if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
-    ask "Curriculum iters" "300"
-    CURRICULUM_ITERS="$REPLY"
-fi
+case "$PROTOTYPE" in
+    obstacle_avoidance | corridor_navigation)
+        ask "Curriculum iters" "300"
+        CURRICULUM_ITERS="$REPLY"
+        ;;
+esac
 
-# Adaptive LR only supported by obstacle_avoidance/train_rl_wb.py currently
+# Adaptive LR supported by obstacle_avoidance + corridor_navigation
 ADAPTIVE_LR="false"
 DESIRED_KL="0.01"
-if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
-    ask_yn "Adaptive LR" "n"
-    ADAPTIVE_LR="$REPLY"
-    if [ "$ADAPTIVE_LR" = "true" ]; then
-        ask "Target KL" "0.01"
-        DESIRED_KL="$REPLY"
-    fi
-fi
+case "$PROTOTYPE" in
+    obstacle_avoidance | corridor_navigation)
+        ask_yn "Adaptive LR" "n"
+        ADAPTIVE_LR="$REPLY"
+        if [ "$ADAPTIVE_LR" = "true" ]; then
+            ask "Target KL" "0.01"
+            DESIRED_KL="$REPLY"
+        fi
+        ;;
+esac
 
 # ╔══════════════════════════════════════╗
 # ║  4. Cluster resources                ║
@@ -190,9 +199,11 @@ fi
 if [ "$SCENARIO" = "hard" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --scenario hard"
 fi
-if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
-    TRAIN_ARGS="${TRAIN_ARGS} --curriculum-iterations ${CURRICULUM_ITERS}"
-fi
+case "$PROTOTYPE" in
+    obstacle_avoidance | corridor_navigation)
+        TRAIN_ARGS="${TRAIN_ARGS} --curriculum-iterations ${CURRICULUM_ITERS}"
+        ;;
+esac
 if [ "$ADAPTIVE_LR" = "true" ]; then
     TRAIN_ARGS="${TRAIN_ARGS} --adaptive-lr --desired-kl ${DESIRED_KL}"
 fi
@@ -201,7 +212,9 @@ JOB_NAME="${EXP_NAME}"
 
 section "Summary"
 info "Prototype" "prototyp_${PROTOTYPE}"
-info "Env version" "$ENV_VERSION"
+if [ "$PROTOTYPE" != "corridor_navigation" ]; then
+    info "Env version" "$ENV_VERSION"
+fi
 if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
     info "Scenario" "$SCENARIO"
 fi
@@ -217,9 +230,11 @@ info "Time limit" "${HOURS}h"
 echo ""
 info "Batch size" "$BATCH envs"
 info "Iterations" "$ITERS"
-if [ "$PROTOTYPE" = "obstacle_avoidance" ]; then
-    info "Curriculum iters" "$CURRICULUM_ITERS"
-fi
+case "$PROTOTYPE" in
+    obstacle_avoidance | corridor_navigation)
+        info "Curriculum iters" "$CURRICULUM_ITERS"
+        ;;
+esac
 if [ "$ADAPTIVE_LR" = "true" ]; then
     info "LR schedule" "adaptive (KL target ${DESIRED_KL})"
 else
