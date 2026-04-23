@@ -111,7 +111,7 @@ def get_cfgs():
         "hover_radius": 0.3,
         # Obstacles — 8 total, mix of 2 boxes, 2 spheres, 2 cylinders, 2 pillars
         "collision_radius": 0.3,
-        "safety_radius": 3.0,
+        "safety_radius": 1.5,
         "corridor_box_sizes":      [(2.5, 2.5, 3.0), (2.8, 2.2, 2.5)],
         "corridor_sphere_radii":   [1.2, 1.4],
         "corridor_cylinder_specs": [(1.0, 3.0), (1.1, 2.5)],
@@ -123,10 +123,10 @@ def get_cfgs():
         # Corridor geometry (all metres). Corridor is fixed-axis along +X.
         "corridor_x_range": [0.0, 32.0],
         "corridor_y_range": [-4.0, 4.0],
-        "corridor_z_range": [0.3, 6.0],
+        "corridor_z_range": [0.0, 6.0],
         "corridor_spawn_x_range": [0.5, 2.5],
         "corridor_spawn_y_range": [-2.5, 2.5],
-        "corridor_spawn_z": 5.0,
+        "corridor_spawn_z": 4.0,
         "corridor_target_pos": [30.0, 0.0, 1.0],
         "corridor_slice_centres": [10.0, 14.0, 18.0, 22.0],
         "corridor_min_gap": 2.0,

@@ -23,12 +23,20 @@ np.random.seed(42)
 # Corridor geometry (metres)
 CORRIDOR_X_RANGE = (0.0, 32.0)
 CORRIDOR_Y_RANGE = (-4.0, 4.0)
-CORRIDOR_Z_RANGE = (0.3, 6.0)
+CORRIDOR_Z_RANGE = (0.0, 6.0)
 SPAWN_X_RANGE = (0.5, 2.5)
 SPAWN_Y_RANGE = (-2.5, 2.5)
-SPAWN_Z = 5.0
+SPAWN_Z = 4.0
 TARGET = np.array([30.0, 0.0, 1.0])
 SLICE_CENTRES = [10.0, 14.0, 18.0, 22.0]
+
+# Proximity / collision (mirror env_cfg)
+SAFETY_RADIUS = 1.5
+COLLISION_RADIUS = 0.3
+
+# Physical corridor walls (L, R, ceiling) — thin boxes hugging the corridor
+# bounds. Ground plane at z=0 is handled by gs.morphs.Plane() in the real env.
+WALL_THICKNESS = 0.2
 
 # Pair-straddling knobs (must match env_cfg)
 FIRST_OFFSET_RANGE = (0.0, 3.0)
@@ -214,9 +222,19 @@ def draw_sample_figure(sample_idx, positions, color):
         (CORRIDOR_X_RANGE[0], CORRIDOR_Y_RANGE[0]),
         CORRIDOR_X_RANGE[1] - CORRIDOR_X_RANGE[0],
         CORRIDOR_Y_RANGE[1] - CORRIDOR_Y_RANGE[0],
-        linewidth=2, edgecolor="black", facecolor="none",
-        linestyle="--", alpha=0.6, label="Corridor bounds",
+        linewidth=1, edgecolor="black", facecolor="none",
+        linestyle=":", alpha=0.4,
     ))
+    # Physical walls (L, R) — thin gray boxes just outside the bounds.
+    for wall_y_centre in (CORRIDOR_Y_RANGE[0] - WALL_THICKNESS / 2.0,
+                          CORRIDOR_Y_RANGE[1] + WALL_THICKNESS / 2.0):
+        ax_xy.add_patch(patches.Rectangle(
+            (CORRIDOR_X_RANGE[0], wall_y_centre - WALL_THICKNESS / 2.0),
+            CORRIDOR_X_RANGE[1] - CORRIDOR_X_RANGE[0],
+            WALL_THICKNESS,
+            linewidth=1.2, edgecolor="#333", facecolor="#555", alpha=0.85,
+        ))
+    ax_xy.plot([], [], "s", color="#555", markersize=9, alpha=0.85, label="Wall (physical)")
     ax_xy.add_patch(patches.Rectangle(
         (SPAWN_X_RANGE[0], SPAWN_Y_RANGE[0]),
         SPAWN_X_RANGE[1] - SPAWN_X_RANGE[0],
@@ -270,9 +288,17 @@ def draw_sample_figure(sample_idx, positions, color):
         (CORRIDOR_X_RANGE[0], CORRIDOR_Z_RANGE[0]),
         CORRIDOR_X_RANGE[1] - CORRIDOR_X_RANGE[0],
         CORRIDOR_Z_RANGE[1] - CORRIDOR_Z_RANGE[0],
-        linewidth=2, edgecolor="black", facecolor="none",
-        linestyle="--", alpha=0.6, label="Corridor bounds",
+        linewidth=1, edgecolor="black", facecolor="none",
+        linestyle=":", alpha=0.4,
     ))
+    # Ceiling (physical top wall) — thin gray strip just above z_max.
+    ax_xz.add_patch(patches.Rectangle(
+        (CORRIDOR_X_RANGE[0], CORRIDOR_Z_RANGE[1]),
+        CORRIDOR_X_RANGE[1] - CORRIDOR_X_RANGE[0],
+        WALL_THICKNESS,
+        linewidth=1.2, edgecolor="#333", facecolor="#555", alpha=0.85,
+    ))
+    ax_xz.plot([], [], "s", color="#555", markersize=9, alpha=0.85, label="Ceiling (physical)")
     ax_xz.axhline(y=0, color="brown", linewidth=2, alpha=0.5)
     ax_xz.fill_between([-1, 33], 0, -0.5, color="brown", alpha=0.1)
 

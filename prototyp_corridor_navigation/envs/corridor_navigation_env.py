@@ -115,13 +115,15 @@ class CorridorNavigationEnv:
         for i in range(2):
             bx = self.box_sizes[i]
             self._obstacle_specs.append(
-                dict(morph="box", size=bx, shape_type=_SHAPE_BOX, z_rest=bx[2] / 2.0, is_pillar=False)
+                dict(morph="box", size=bx, shape_type=_SHAPE_BOX, z_rest=bx[2] / 2.0,
+                     is_pillar=False, is_wall=False)
             )
             sr = float(self.sphere_radii_cfg[i])
             # Sphere sits on corridor floor (z = 0.3), not the global ground,
             # so its centre is lifted by 0.3 to avoid half-burying small radii.
             self._obstacle_specs.append(
-                dict(morph="sphere", radius=sr, shape_type=_SHAPE_SPHERE, z_rest=sr + 0.3, is_pillar=False)
+                dict(morph="sphere", radius=sr, shape_type=_SHAPE_SPHERE, z_rest=sr + 0.3,
+                     is_pillar=False, is_wall=False)
             )
             cr, ch = self.cylinder_specs_cfg[i]
             self._obstacle_specs.append(
@@ -132,6 +134,7 @@ class CorridorNavigationEnv:
                     shape_type=_SHAPE_CYLINDER,
                     z_rest=float(ch) / 2.0,
                     is_pillar=False,
+                    is_wall=False,
                 )
             )
             pr, ph = self.pillar_specs_cfg[i]
@@ -143,6 +146,7 @@ class CorridorNavigationEnv:
                     shape_type=_SHAPE_CYLINDER,
                     z_rest=float(ph) / 2.0,
                     is_pillar=True,
+                    is_wall=False,
                 )
             )
         self.num_obstacles = len(self._obstacle_specs)  # 8
@@ -185,6 +189,48 @@ class CorridorNavigationEnv:
                  or self._obstacle_specs[2 * s + 1].get("is_pillar", False))
             for s in range(n_slices)
         ]
+
+        # Corridor boundary walls + ceiling as physical obstacles.
+        # Inside face of each wall coincides with the corridor bounding box, so
+        # "crashing on a wall" replaces the abstract "crossed y=±4 / z=6" check
+        # as the primary boundary signal. Walls always occupy indices
+        # [num_obs_random, ..., num_obs_random+2], so _place_obstacles_corridor
+        # (which only touches 2*slice_i and 2*slice_i+1) leaves them untouched.
+        y_min, y_max = self.corridor_y_range
+        z_min, z_max = self.corridor_z_range
+        x_min, x_max = self.corridor_x_range
+        wall_thickness = 0.2
+        wall_x_len = x_max - x_min
+        wall_z_len = z_max - z_min
+        wall_x_centre = 0.5 * (x_min + x_max)
+        wall_z_centre = 0.5 * (z_min + z_max)
+        ceiling_y_len = y_max - y_min
+
+        self._obstacle_specs.append(dict(  # left wall
+            morph="box",
+            size=(wall_x_len, wall_thickness, wall_z_len),
+            shape_type=_SHAPE_BOX,
+            z_rest=wall_z_centre,
+            is_pillar=False, is_wall=True,
+            fixed_pos=(wall_x_centre, y_min - wall_thickness / 2.0, wall_z_centre),
+        ))
+        self._obstacle_specs.append(dict(  # right wall
+            morph="box",
+            size=(wall_x_len, wall_thickness, wall_z_len),
+            shape_type=_SHAPE_BOX,
+            z_rest=wall_z_centre,
+            is_pillar=False, is_wall=True,
+            fixed_pos=(wall_x_centre, y_max + wall_thickness / 2.0, wall_z_centre),
+        ))
+        self._obstacle_specs.append(dict(  # ceiling
+            morph="box",
+            size=(wall_x_len, ceiling_y_len, wall_thickness),
+            shape_type=_SHAPE_BOX,
+            z_rest=z_max + wall_thickness / 2.0,
+            is_pillar=False, is_wall=True,
+            fixed_pos=(wall_x_centre, 0.5 * (y_min + y_max), z_max + wall_thickness / 2.0),
+        ))
+        self.num_obstacles = len(self._obstacle_specs)  # 8 random + 3 walls = 11
 
         # Depth camera params
         self.depth_res = obs_cfg.get("depth_res", 64)
@@ -259,20 +305,26 @@ class CorridorNavigationEnv:
         else:
             self.target_vis = None
 
-        # Mixed-shape obstacles (8 total)
+        # Mixed-shape obstacles (8 random) + boundary walls/ceiling (3 fixed) = 11 total.
+        # Walls are constructed at their fixed positions and never moved (neither
+        # by _place_obstacles_corridor nor by the curriculum underground trick),
+        # so they stay visible to the depth camera from step 0.
         self.obstacles = []
         for s in self._obstacle_specs:
+            is_wall = s.get("is_wall", False)
+            init_pos = s.get("fixed_pos", (0.0, 0.0, s["z_rest"]))
+            color = (0.45, 0.45, 0.48) if is_wall else (0.8, 0.3, 0.2)
             if s["morph"] == "box":
                 morph = gs.morphs.Box(
                     size=s["size"],
-                    pos=(0.0, 0.0, s["z_rest"]),
+                    pos=init_pos,
                     fixed=True,
                     collision=False,
                 )
             elif s["morph"] == "sphere":
                 morph = gs.morphs.Sphere(
                     radius=s["radius"],
-                    pos=(0.0, 0.0, s["z_rest"]),
+                    pos=init_pos,
                     fixed=True,
                     collision=False,
                 )
@@ -280,14 +332,14 @@ class CorridorNavigationEnv:
                 morph = gs.morphs.Cylinder(
                     radius=s["radius"],
                     height=s["height"],
-                    pos=(0.0, 0.0, s["z_rest"]),
+                    pos=init_pos,
                     fixed=True,
                     collision=False,
                 )
             obs_entity = scene.add_entity(
                 morph=morph,
                 surface=gs.surfaces.Rough(
-                    diffuse_texture=gs.textures.ColorTexture(color=(0.8, 0.3, 0.2))
+                    diffuse_texture=gs.textures.ColorTexture(color=color)
                 ),
             )
             self.obstacles.append(obs_entity)
@@ -468,6 +520,13 @@ class CorridorNavigationEnv:
             device=gs.device,
             dtype=gs.tc_float,
         )
+        # Walls are fixed in all envs; pre-populate their rows so proximity /
+        # crash distance checks see them from step 0 (including during the
+        # curriculum phase when random obstacles are hidden underground).
+        for i, s in enumerate(self._obstacle_specs):
+            if s.get("is_wall", False):
+                fp = torch.tensor(s["fixed_pos"], device=gs.device, dtype=gs.tc_float)
+                self.obstacle_positions[:, i, :] = fp
 
         # Obstacle collision / proximity
         self.obstacle_collision = torch.zeros(
@@ -882,12 +941,16 @@ class CorridorNavigationEnv:
         )
         spawn_pos = torch.stack([sx, sy, sz], dim=-1)
 
-        # Curriculum: obstacles stay underground until curriculum_steps.
+        # Curriculum: random obstacles stay underground until curriculum_steps,
+        # but walls/ceiling remain in place so the drone learns corridor
+        # boundaries visually from step 0.
         curriculum_steps = self.env_cfg.get("curriculum_steps", 0)
         if self.global_step < curriculum_steps:
             underground = torch.zeros((n, 3), device=gs.device, dtype=gs.tc_float)
             underground[:, 2] = -100.0
             for i, obs_entity in enumerate(self.obstacles):
+                if self._obstacle_specs[i].get("is_wall", False):
+                    continue
                 obs_entity.set_pos(underground, envs_idx=envs_idx, zero_velocity=True)
                 self.obstacle_positions[envs_idx, i] = underground
         else:
