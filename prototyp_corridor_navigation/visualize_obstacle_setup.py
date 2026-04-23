@@ -21,14 +21,14 @@ np.random.seed(42)
 # ------------------------------------------------------------------
 
 # Corridor geometry (metres)
-CORRIDOR_X_RANGE = (0.0, 32.0)
+CORRIDOR_X_RANGE = (0.0, 16.0)
 CORRIDOR_Y_RANGE = (-4.0, 4.0)
 CORRIDOR_Z_RANGE = (0.0, 6.0)
 SPAWN_X_RANGE = (0.5, 2.5)
 SPAWN_Y_RANGE = (-2.5, 2.5)
 SPAWN_Z = 4.0
-TARGET = np.array([30.0, 0.0, 1.0])
-SLICE_CENTRES = [10.0, 14.0, 18.0, 22.0]
+TARGET = np.array([15.0, 0.0, 1.0])
+SLICE_CENTRES = [5.0, 10.0]
 
 # Proximity / collision (mirror env_cfg)
 SAFETY_RADIUS = 1.5
@@ -44,17 +44,17 @@ PAIR_GAP_RANGE = (1.0, 2.0)
 X_JITTER = 0.2
 
 # Obstacle size specs (must match env_cfg lists). Shape-interleaved:
-# [Box0, Sphere0, Cyl0, Pillar0, Box1, Sphere1, Cyl1, Pillar1].
-BOX_SIZES = [(2.5, 2.5, 3.0), (2.8, 2.2, 2.5)]
-SPHERE_RADII = [1.2, 1.4]
-CYLINDER_SPECS = [(1.0, 3.0), (1.1, 2.5)]     # (radius, height)
-PILLAR_SPECS = [(0.5, 4.5), (0.6, 4.0)]       # (radius, height)
+# [Box0, Sphere0, Cyl0, Pillar0] — one of each shape, paired across 2 slices.
+BOX_SIZES = [(2.5, 2.5, 3.0)]
+SPHERE_RADII = [1.2]
+CYLINDER_SPECS = [(1.0, 3.0)]     # (radius, height)
+PILLAR_SPECS = [(0.5, 4.5)]       # (radius, height)
 
 
 def build_specs():
-    """Return a list of 8 shape dicts in the same interleaved order as the env."""
+    """Return a list of 4*N shape dicts in the same interleaved order as the env."""
     specs = []
-    for i in range(2):
+    for i in range(len(BOX_SIZES)):
         bx = BOX_SIZES[i]
         specs.append(dict(
             morph="box", size=bx,
@@ -83,14 +83,18 @@ def build_specs():
 
 
 SPECS = build_specs()
-assert len(SPECS) == 8
+N_SLICES = len(SLICE_CENTRES)
+assert len(SPECS) == 2 * N_SLICES, (
+    f"Shape specs produce {len(SPECS)} obstacles but slice_centres "
+    f"wants {2 * N_SLICES} (2 per slice)"
+)
 
 # Per-slice pillar flag: if either obstacle in the pair is a pillar,
 # axis is locked to Y (vertical detour is geometrically unreasonable
 # for 4 m-tall pillars in a 5.7 m corridor).
 PAIR_HAS_PILLAR = [
     SPECS[2 * s]["is_pillar"] or SPECS[2 * s + 1]["is_pillar"]
-    for s in range(4)
+    for s in range(N_SLICES)
 ]
 
 # Spawn centre for the line anchor.
@@ -275,7 +279,7 @@ def draw_sample_figure(sample_idx, positions, color):
 
     # ---------- Side (XZ) ----------
     ax_xz.set_title(
-        "Side (XZ). Pillar-containing slices (1 & 3) are locked to Y-axis pairs; "
+        "Side (XZ). Pillar-containing slices are locked to Y-axis pairs; "
         "their two obstacles project onto a single column in this view.",
         fontsize=11,
     )
@@ -339,11 +343,11 @@ n_tests = 10_000
 gap_samples = []
 d_samples = []
 axis_counts = {0: 0, 1: 0}
-axis_by_slice = {s: {0: 0, 1: 0} for s in range(4)}
+axis_by_slice = {s: {0: 0, 1: 0} for s in range(N_SLICES)}  # N_SLICES-keyed
 
 for _ in range(n_tests):
     positions = place_corridor()
-    for slice_i in range(4):
+    for slice_i in range(N_SLICES):
         idx_a, idx_b = 2 * slice_i, 2 * slice_i + 1
         spec_a = SPECS[idx_a]
         spec_b = SPECS[idx_b]
@@ -373,7 +377,7 @@ print(f"face_gap min/mean/max:  {gap_samples.min():.3f} / {gap_samples.mean():.3
 print(f"distance min/mean/max:  {d_samples.min():.3f} / {d_samples.mean():.3f} / {d_samples.max():.3f} m  (expected {FIRST_OFFSET_RANGE})")
 total = sum(axis_counts.values())
 print(f"Axis split overall:     Y={axis_counts[0] / total:.1%}, Z={axis_counts[1] / total:.1%}")
-for s in range(4):
+for s in range(N_SLICES):
     tot = sum(axis_by_slice[s].values())
     y_pct = axis_by_slice[s][0] / tot
     z_pct = axis_by_slice[s][1] / tot
@@ -385,7 +389,7 @@ assert PAIR_GAP_RANGE[0] - 1e-6 <= gap_samples.min(), "face_gap below min"
 assert gap_samples.max() <= PAIR_GAP_RANGE[1] + 1e-6, "face_gap above max"
 assert FIRST_OFFSET_RANGE[0] - 1e-6 <= d_samples.min(), "d below min"
 assert d_samples.max() <= FIRST_OFFSET_RANGE[1] + 1e-6, "d above max"
-for s in range(4):
+for s in range(N_SLICES):
     if PAIR_HAS_PILLAR[s]:
         assert axis_by_slice[s][1] == 0, f"slice {s} has pillar but Z-axis draws occurred"
 print("*** all formula invariants hold ***")

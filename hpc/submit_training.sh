@@ -93,13 +93,20 @@ fi
 
 # --- Per-prototype defaults ---
 case "$PROTOTYPE" in
-    obstacle_avoidance | corridor_navigation)
+    obstacle_avoidance)
         DEF_BATCH=256
         DEF_ITERS=8001
+        DEF_CURRICULUM=300
+        ;;
+    corridor_navigation)
+        DEF_BATCH=256
+        DEF_ITERS=1001
+        DEF_CURRICULUM=301
         ;;
     *)
         DEF_BATCH=4096
         DEF_ITERS=401
+        DEF_CURRICULUM=0
         ;;
 esac
 DEF_EXP_NAME="genesis-${PROTOTYPE}"
@@ -131,7 +138,7 @@ ITERS="$REPLY"
 CURRICULUM_ITERS="0"
 case "$PROTOTYPE" in
     obstacle_avoidance | corridor_navigation)
-        ask "Curriculum iters" "300"
+        ask "Curriculum iters" "$DEF_CURRICULUM"
         CURRICULUM_ITERS="$REPLY"
         ;;
 esac

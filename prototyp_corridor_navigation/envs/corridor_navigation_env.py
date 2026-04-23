@@ -101,18 +101,24 @@ class CorridorNavigationEnv:
         self.cylinder_specs_cfg = [tuple(s) for s in env_cfg["corridor_cylinder_specs"]]
         self.pillar_specs_cfg = [tuple(s) for s in env_cfg["corridor_pillar_specs"]]
 
-        # Shape-interleaved obstacle layout:
-        # [Box, Sphere, Cylinder, Pillar, Box, Sphere, Cylinder, Pillar]
-        # Pairing into 4 slices (indices (0,1), (2,3), (4,5), (6,7)) gives
-        # each corridor slice two different shape types.
+        # Shape-interleaved obstacle layout: each loop iteration appends
+        # [Box, Sphere, Cylinder, Pillar], so N pairs of shape entries yield
+        # 4*N obstacles. Paired into slices (indices (0,1), (2,3), (4,5), ...)
+        # each slice gets two different shape types. All 4 shape lists must
+        # have the same length, and 4 * len(box_sizes) must equal 2 * n_slices
+        # (two obstacles per corridor slice).
+        n_shape_pairs = len(self.box_sizes)
         assert (
-            len(self.box_sizes) == 2
-            and len(self.sphere_radii_cfg) == 2
-            and len(self.cylinder_specs_cfg) == 2
-            and len(self.pillar_specs_cfg) == 2
-        ), "Corridor env expects exactly 2 of each shape type"
+            len(self.sphere_radii_cfg) == n_shape_pairs
+            and len(self.cylinder_specs_cfg) == n_shape_pairs
+            and len(self.pillar_specs_cfg) == n_shape_pairs
+        ), (
+            f"Corridor env: shape lists must all be the same length, got "
+            f"box={len(self.box_sizes)}, sphere={len(self.sphere_radii_cfg)}, "
+            f"cyl={len(self.cylinder_specs_cfg)}, pillar={len(self.pillar_specs_cfg)}"
+        )
         self._obstacle_specs = []
-        for i in range(2):
+        for i in range(n_shape_pairs):
             bx = self.box_sizes[i]
             self._obstacle_specs.append(
                 dict(morph="box", size=bx, shape_type=_SHAPE_BOX, z_rest=bx[2] / 2.0,
@@ -164,6 +170,14 @@ class CorridorNavigationEnv:
         self.target_pos_val = list(env_cfg["corridor_target_pos"])
         self.slice_centres = list(env_cfg["corridor_slice_centres"])
         self.min_gap = float(env_cfg.get("corridor_min_gap", 2.0))  # noqa: F841 - documented constraint; guaranteed by Y-sampling ranges
+
+        # Consistency: each slice gets 2 obstacles (a pair). Shape lists produce
+        # 4 obstacles per pair-entry (Box + Sphere + Cyl + Pillar interleaved).
+        assert 4 * n_shape_pairs == 2 * len(self.slice_centres), (
+            f"Corridor env: shape lists produce {4 * n_shape_pairs} random obstacles "
+            f"but slice_centres asks for {2 * len(self.slice_centres)} "
+            f"({len(self.slice_centres)} slices * 2 obstacles per slice)"
+        )
 
         # Spawn->target line for line-anchored obstacle placement.
         spawn_cx = 0.5 * (self.spawn_x_range[0] + self.spawn_x_range[1])

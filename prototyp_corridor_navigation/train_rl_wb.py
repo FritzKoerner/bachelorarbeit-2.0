@@ -103,32 +103,34 @@ def get_cfgs():
         "decimation": 300,             # PID runs at 100 Hz, RL decides every 300 steps (3 s)
         "action_scales": [1.0, 1.0, 1.0],
         # Length of the obstacles-hidden warm-up phase, in env steps.
-        # 6000 = 300 iterations * num_steps_per_env(20). This is the authoritative
+        # 6020 = 301 iterations * num_steps_per_env(20). This is the authoritative
         # default — the --curriculum-iterations CLI flag only overrides it when
         # explicitly passed.
-        "curriculum_steps": 6000,
+        "curriculum_steps": 6020,
         # Success: within radius of target for the entire decision step
         "hover_radius": 0.3,
         # Obstacles — 8 total, mix of 2 boxes, 2 spheres, 2 cylinders, 2 pillars
         "collision_radius": 0.3,
         "safety_radius": 1.5,
-        "corridor_box_sizes":      [(2.5, 2.5, 3.0), (2.8, 2.2, 2.5)],
-        "corridor_sphere_radii":   [1.2, 1.4],
-        "corridor_cylinder_specs": [(1.0, 3.0), (1.1, 2.5)],
-        "corridor_pillar_specs":   [(0.5, 4.5), (0.6, 4.0)],
+        # One entry per shape => 4 random obstacles (Box + Sphere + Cyl + Pillar),
+        # distributed across 2 slices as pairs (Box+Sphere), (Cyl+Pillar).
+        "corridor_box_sizes":      [(2.5, 2.5, 3.0)],
+        "corridor_sphere_radii":   [1.2],
+        "corridor_cylinder_specs": [(1.0, 3.0)],
+        "corridor_pillar_specs":   [(0.5, 4.5)],
         "corridor_pair_gap_min": 1.0,
         "corridor_pair_gap_max": 2.0,
         "corridor_first_obstacle_offset_min": 0.0,
         "corridor_first_obstacle_offset_max": 3.0,
         # Corridor geometry (all metres). Corridor is fixed-axis along +X.
-        "corridor_x_range": [0.0, 32.0],
+        "corridor_x_range": [0.0, 16.0],
         "corridor_y_range": [-4.0, 4.0],
         "corridor_z_range": [0.0, 6.0],
         "corridor_spawn_x_range": [0.5, 2.5],
         "corridor_spawn_y_range": [-2.5, 2.5],
         "corridor_spawn_z": 4.0,
-        "corridor_target_pos": [30.0, 0.0, 1.0],
-        "corridor_slice_centres": [10.0, 14.0, 18.0, 22.0],
+        "corridor_target_pos": [15.0, 0.0, 1.0],
+        "corridor_slice_centres": [5.0, 10.0],
         "corridor_min_gap": 2.0,
         # Depth camera
         "render_interval": 1,
@@ -187,7 +189,7 @@ def main():
     parser.add_argument("-e", "--exp_name", type=str, default="corridor-navigation")
     parser.add_argument("-v", "--vis", action="store_true", default=False)
     parser.add_argument("-B", "--num_envs", type=int, default=256)
-    parser.add_argument("--max_iterations", type=int, default=8001)
+    parser.add_argument("--max_iterations", type=int, default=1001)
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to checkpoint to resume from (e.g. logs/corridor-navigation/model_300.pt)")
     parser.add_argument("--curriculum-iterations", type=int, default=None,
@@ -258,7 +260,7 @@ if __name__ == "__main__":
 
 """
 # Training with W&B logging (headless, 256 envs)
-python train_rl_wb.py -B 256 --max_iterations 8001
+python train_rl_wb.py -B 256 --max_iterations 1001
 
 # Smoke test with viewer (4 envs, 5 iterations)
 python train_rl_wb.py -B 4 -v --max_iterations 5

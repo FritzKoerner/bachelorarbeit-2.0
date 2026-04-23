@@ -18,7 +18,7 @@
 # change rollout memory (walls are fixed, not per-env).
 #
 # The env runs curriculum by default: random obstacles stay underground until
-# `global_step >= curriculum_steps` (6000 by default, ≈ 300 iterations at
+# `global_step >= curriculum_steps` (6020 by default, ≈ 301 iterations at
 # num_steps_per_env=20). Walls/ceiling stay visible from step 0.
 #
 # Submit: sbatch train_corridor_navigation.job
@@ -52,10 +52,10 @@ cd "$GENESIS_DIR/prototyp_corridor_navigation"
 echo "=== Job started: $(date) ==="
 echo "Host: $(hostname)"
 echo "GPU:  $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
-echo "Training: train_rl_wb.py -B 256 --max_iterations 8001"
+echo "Training: train_rl_wb.py -B 256 --max_iterations 1001 --curriculum-iterations 301"
 echo ""
 
-python train_rl_wb.py -B 256 --max_iterations 8001
+python train_rl_wb.py -B 256 --max_iterations 1001 --curriculum-iterations 301
 
 echo ""
 echo "=== Job complete: $(date) ==="
