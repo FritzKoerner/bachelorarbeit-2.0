@@ -10,6 +10,7 @@ Migrated from v0.3.13 — see the original repo at `../genesis/` for history and
 
 - **prototyp_global_coordinate/** — Global coordinate-based landing with cascading PID controller. Uses PPO via rsl-rl.
 - **prototyp_obstacle_avoidance/** — CNN depth-map obstacle avoidance. Extends global_coordinate with random obstacles, downward-facing depth camera, and rsl-rl v5.0.1 `CNNModel` + `share_cnn_encoders`.
+- **prototyp_corridor_navigation/** — Forked from obstacle_avoidance env v2. Fixed-axis corridor slalom along +X with mixed-shape obstacles (2 boxes, 2 spheres, 2 cylinders, 2 pillar cylinders). Hard termination on leaving the corridor bounding box; no v1/v2 split, no strategic/vineyard placers.
 - **assets/** — Shared drone URDF + meshes (`assets/robots/draugas/`). Referenced from prototypes as `../assets/`.
 - **hpc/** — HPC Leipzig cluster scripts: env setup, code sync, SLURM job submission.
 
@@ -178,6 +179,37 @@ Key files (mirrors `prototyp_global_coordinate/` structure):
 **Rewards (v2)**: progress (+5, delta-distance), close (+1, exp(-dist)), obstacle_proximity (-6), crash (-100), success (+200). No dt-scaling, no time penalty.
 
 **Video recording (`record_landing.py`)**: two-scene design (policy scene + viz scene) because BatchRenderer forbids mixed resolutions. Pass 2 streams each rendered frame directly to `cv2.VideoWriter` (lazy-init on first frame) — never accumulate into a list. A default 60 s / decimation=300 episode is ~6000 `substep_callback` fires × full-res frames; buffering them all OOM-kills SLURM jobs with tight `--mem`.
+
+## Running (prototyp_corridor_navigation)
+
+```bash
+cd prototyp_corridor_navigation
+
+# PPO training with W&B (headless, 256 envs)
+python train_rl_wb.py -B 256 --max_iterations 8001
+
+# Smoke test with viewer (4 envs, 5 iterations)
+python train_rl_wb.py -B 4 -v --max_iterations 5
+
+# Smoke test with curriculum disabled (obstacles visible from step 0)
+python train_rl_wb.py -B 4 -v --max_iterations 5 --curriculum-iterations 0
+```
+
+Eval/record/visualize scripts are not yet ported from `prototyp_obstacle_avoidance/`; add them once training is stable and `cfgs.pkl` format has settled.
+
+## prototyp_corridor_navigation Architecture
+
+Fixed-axis corridor slalom along +X. Single env class (`CorridorNavigationEnv`), no v1/v2 split. State/action/depth/observation scales identical to `prototyp_obstacle_avoidance` env v2.
+
+**Corridor geometry (metres)**: X `[0.0, 13.0]`, Y `[-3.0, 3.0]`, Z `[0.3, 6.0]`. Spawn uniform in X `[0.5, 5.5]` × Y `[-2.5, 2.5]` at Z `5.0`. Target fixed at `(12.0, 0.0, 1.0)`. Leaving the bounding box terminates the episode (contributes to both `crash` and `out_of_corridor` reward components — the latter is logged separately for diagnosis).
+
+**Obstacle mix (8 total)**: 2 Boxes, 2 Spheres, 2 Cylinders, 2 thin-tall pillar Cylinders. Sizes configurable via `env_cfg` keys `corridor_{box_sizes, sphere_radii, cylinder_specs, pillar_specs}`. Placed in 4 X-slices (centres `[3.5, 6.0, 8.5, 11.0]`), 2 per slice on opposite Y sides with a guaranteed ≥ 2.5 m Y-gap so the drone always has a feasible path. Shape-interleaved layout gives each slice a different shape pair.
+
+**Shape-aware collision**: `_compute_obstacle_distances()` computes per-shape distances (box AABB / sphere radial / cylinder radial+axial) for every obstacle and dispatches via `torch.where` on `self.obstacle_shape_type`. Fully vectorised across the `n_obs` axis — no Python loop per obstacle.
+
+**Reward scales**: `progress +0.5`, `close +0.1`, `obstacle_proximity -0.6`, `crash -10.0`, `success +20.0`, `out_of_corridor -10.0` (same magnitude as `crash`, same sign convention, logged separately).
+
+**Curriculum**: identical to obstacle_avoidance — obstacles stay underground (`z = -100`) until `global_step >= curriculum_steps`. Corridor bounds are enforced from step 0, so the agent learns to stay in the box even during curriculum warm-up.
 
 ## Running on HPC (Leipzig cluster)
 
